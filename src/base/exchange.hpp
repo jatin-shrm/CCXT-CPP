@@ -11,6 +11,7 @@ public:
 
     virtual ~Exchange() = default;
 
+    virtual void authenticate() = 0;
     virtual void fetch_markets() = 0;
     virtual void fetch_balance() = 0;
     virtual void fetch_ticker(const std::string &symbol) = 0;

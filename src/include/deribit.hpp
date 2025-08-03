@@ -16,6 +16,7 @@ class Deribit : public Exchange
 public:
     Deribit(const nlohmann::json &config);
 
+    void authenticate() override;
     void fetch_markets() override;
     void fetch_balance() override;
     void fetch_ticker(const std::string &symbol) override;

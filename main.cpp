@@ -8,10 +8,10 @@ int main()
 {
     // Configuration for testnet
     nlohmann::json config = {
-        {"apiKey", ""}, // Leave empty for public endpoints like fetch_markets
-        {"secret", ""},
+        {"apiKey", "b42LEgvL"}, // Leave empty for public endpoints like fetch_markets
+        {"secret", "FWsNL9GznVOz7x3CIV1lkQ3CrPMtVevzqLBohI4slko"},
         {"password", ""},
-        {"is_test", false} // true = testnet, false = mainnet
+        {"is_test", true} // true = testnet, false = mainnet
     };
 
     // Create Deribit client
@@ -21,7 +21,7 @@ int main()
     // client.connect();
     // std::cout << "Connected successfully.\n";
 
-    client.fetch_markets();
+    client.fetch_balance();
 
     // Keep main thread alive to receive messages
     std::this_thread::sleep_for(std::chrono::seconds(10));

@@ -2,6 +2,10 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#include <sstream>
+#include <iomanip>
 
 Deribit::Deribit(const nlohmann::json &config)
 {
@@ -98,7 +102,34 @@ void Deribit::fetch_markets()
     send_request(req);
 }
 
-void Deribit::fetch_balance() {}
+void Deribit::authenticate()
+{
+    if (!is_connected())
+    {
+        connect();
+    }
+
+    nlohmann::json req = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", "public/auth"},
+        {"params", {{"grant_type", "client_credentials"}, {"client_id", apiKey}, {"client_secret", secret}}}};
+
+    send_request(req);
+}
+
+void Deribit::fetch_balance() {
+    authenticate();                                              // Step 1: Auth
+    std::this_thread::sleep_for(std::chrono::milliseconds(100)); // small wait for auth
+
+    nlohmann::json req = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", "private/get_account_summary"},
+        {"params", {{"currency", "BTC"}}}};
+
+    send_request(req);
+}
 void Deribit::fetch_ticker(const std::string &symbol) {}
 void Deribit::fetch_order_book(const std::string &symbol) {}
 void Deribit::create_order(const std::string &symbol, const std::string &side, double amount, double price) {}
