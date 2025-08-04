@@ -21,7 +21,10 @@ int main()
     // client.connect();
     // std::cout << "Connected successfully.\n";
 
-    client.fetch_balance();
+    
+    // client.create_order("BTC-PERPETUAL", "buy", 10, 20000);
+
+    client.fetch_orders("BTC");
 
     // Keep main thread alive to receive messages
     std::this_thread::sleep_for(std::chrono::seconds(10));

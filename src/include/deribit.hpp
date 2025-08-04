@@ -21,6 +21,7 @@ public:
     void fetch_balance() override;
     void fetch_ticker(const std::string &symbol) override;
     void fetch_order_book(const std::string &symbol) override;
+    void fetch_orders(const std::string &currency = "BTC") override;
     void create_order(const std::string &symbol, const std::string &side, double amount, double price) override;
     void cancel_order(const std::string &order_id) override;
 
