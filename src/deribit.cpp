@@ -2,6 +2,10 @@
 #include <iostream>
 #include <chrono>
 #include <thread>
+#include <openssl/hmac.h>
+#include <openssl/evp.h>
+#include <sstream>
+#include <iomanip>
 
 Deribit::Deribit(const nlohmann::json &config)
 {
@@ -98,8 +102,77 @@ void Deribit::fetch_markets()
     send_request(req);
 }
 
-void Deribit::fetch_balance() {}
+void Deribit::authenticate()
+{
+    if (!is_connected())
+    {
+        connect();
+    }
+
+    nlohmann::json req = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", "public/auth"},
+        {"params", {{"grant_type", "client_credentials"}, {"client_id", apiKey}, {"client_secret", secret}}}};
+
+    send_request(req);
+}
+
+void Deribit::fetch_balance() {
+    authenticate();                                             
+    std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
+
+    nlohmann::json req = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", "private/get_account_summary"},
+        {"params", {{"currency", "BTC"}}}};
+
+    send_request(req);
+}
+
+void Deribit::fetch_orders(const std::string &currency)
+{
+    authenticate();                                             
+    std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
+
+    nlohmann::json req = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", "private/get_order_history_by_currency"},
+        {"params", {
+                       {"currency", currency}, {"kind", "future"}, // optional: future, option, or leave out
+                       {"count", 20},                              // number of results to fetch (max 100)
+                       {"include_old", true},                      // include older orders too
+                       {"include_unfilled", true}                  // also show unfilled orders
+                   }}};
+
+    send_request(req);
+}
 void Deribit::fetch_ticker(const std::string &symbol) {}
 void Deribit::fetch_order_book(const std::string &symbol) {}
-void Deribit::create_order(const std::string &symbol, const std::string &side, double amount, double price) {}
-void Deribit::cancel_order(const std::string &order_id) {}
+void Deribit::create_order(const std::string &symbol, const std::string &side, double amount, double price) {
+    authenticate();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    std::string method = (side == "buy") ? "private/buy" : "private/sell";
+
+    nlohmann::json request = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", method},
+        {"params", {{"instrument_name", symbol}, {"amount", amount}, {"type", "limit"}, // or "market"
+                    {"price", price}}}};
+
+    send_request(request);
+}
+void Deribit::cancel_order(const std::string &order_id) {
+    authenticate();
+    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+    nlohmann::json request = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", "private/cancel"},
+        {"params", {{"order_id", order_id}}}};
+
+    send_request(request);
+}
