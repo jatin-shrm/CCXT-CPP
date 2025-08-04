@@ -320,24 +320,23 @@ std::future<void> DeribitImproved::authenticate_internal() {
         {"client_secret", get_secret()}
     };
     
-    return send_request("public/auth", params, false)
-        .then([this](std::future<nlohmann::json> response_future) {
-            auto response = response_future.get();
+    return std::async(std::launch::async, [this, params]() {
+        auto response = send_request("public/auth", params, false).get();
+        
+        if (response.contains("result")) {
+            auto result = response["result"];
+            access_token_ = Utils::safe_string(result, "access_token");
             
-            if (response.contains("result")) {
-                auto result = response["result"];
-                access_token_ = Utils::safe_string(result, "access_token");
-                
-                int expires_in = Utils::safe_integer(result, "expires_in", 3600);
-                token_expiry_ = std::chrono::system_clock::now() + 
-                              std::chrono::seconds(expires_in - 300); // 5 min buffer
-                
-                authenticated_.store(true);
-                std::cout << "Successfully authenticated with Deribit" << std::endl;
-            } else {
-                throw AuthenticationError("Authentication response missing result");
-            }
-        });
+            int expires_in = Utils::safe_integer(result, "expires_in", 3600);
+            token_expiry_ = std::chrono::system_clock::now() + 
+                          std::chrono::seconds(expires_in - 300); // 5 min buffer
+            
+            authenticated_.store(true);
+            std::cout << "Successfully authenticated with Deribit" << std::endl;
+        } else {
+            throw AuthenticationError("Authentication response missing result");
+        }
+    });
 }
 
 // Market data methods implementation
