@@ -62,7 +62,52 @@ void Deribit::on_open(websocketpp::connection_hdl hdl)
 
 void Deribit::on_message(websocketpp::connection_hdl, message_ptr msg)
 {
-    std::cout << "Received: " << msg->get_payload() << std::endl;
+    std::string payload = msg->get_payload();
+    std::cout << "Received: " << payload << std::endl;
+    try
+    {
+        auto response = nlohmann::json::parse(payload);
+
+        if (response.contains("id") && response["id"] == last_auth_id)
+        {
+            if (response.contains("result") && response["result"].contains("access_token"))
+            {
+                access_token = response["result"]["access_token"];
+                long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                    std::chrono::system_clock::now().time_since_epoch())
+                                    .count();
+                auth_expires_at = now + response["result"].value("expires_in", 0LL) * 1000;
+
+                std::lock_guard<std::mutex> lock(auth_mtx);
+                authenticated = true;
+                auth_in_progress = false;
+                auth_cv.notify_all();
+                return;
+            }
+        }
+
+        if (response.contains("params") && response["params"].contains("channel"))
+        {
+            std::string channel = response["params"]["channel"];
+
+            if (channel.rfind("user.orders", 0) == 0) // starts with "user.orders"
+            {
+                std::cout << "[ORDER UPDATE]:\n"
+                          << response["params"]["data"].dump(4) << "\n";
+            }
+            else
+            {
+                std::cout << "[CHANNEL MESSAGE] " << channel << ":\n"
+                          << response["params"].dump(4) << "\n";
+            }
+        }
+
+        // Handle other responses...
+    }
+    catch (const std::exception &e)
+    {
+        std::cerr << "Failed to parse message: " << e.what() << std::endl;
+    }
 }
 
 void Deribit::on_fail(websocketpp::connection_hdl)
@@ -104,23 +149,75 @@ void Deribit::fetch_markets()
 
 void Deribit::authenticate()
 {
+    std::unique_lock<std::mutex> lock(auth_mtx);
+
+    long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
+                        std::chrono::system_clock::now().time_since_epoch())
+                        .count();
+
+    if (authenticated && now < auth_expires_at)
+    {
+        return;
+    }
+
+    if (auth_in_progress)
+    {
+        auth_cv.wait(lock, [this]()
+                     { return authenticated; });
+        return;
+    }
+
+    auth_in_progress = true;
+
     if (!is_connected())
     {
         connect();
     }
 
+    // 1. Timestamp and nonce
+    std::string timestamp = std::to_string(now);
+    std::string nonce = timestamp;
+
+    // 2. Message to sign
+    std::string message = timestamp + "\n" + nonce + "\n";
+
+    // 3. HMAC-SHA256 signature
+    unsigned char hash[EVP_MAX_MD_SIZE];
+    unsigned int len = EVP_MAX_MD_SIZE;
+
+    HMAC(EVP_sha256(),
+         secret.c_str(), secret.length(),
+         reinterpret_cast<const unsigned char *>(message.c_str()), message.length(),
+         hash, &len);
+
+    // 4. Convert to hex lowercase string
+    std::stringstream ss;
+    for (unsigned int i = 0; i < len; ++i)
+    {
+        ss << std::hex << std::setfill('0') << std::setw(2) << (int)hash[i];
+    }
+    std::string signature = ss.str();
+
+    last_auth_id = request_id++;
+
+    // 5. Send the authentication request
     nlohmann::json req = {
         {"jsonrpc", "2.0"},
-        {"id", request_id++},
+        {"id", last_auth_id},
         {"method", "public/auth"},
-        {"params", {{"grant_type", "client_credentials"}, {"client_id", apiKey}, {"client_secret", secret}}}};
+        {"params", {{"grant_type", "client_signature"}, {"client_id", apiKey}, {"timestamp", now}, {"nonce", nonce}, {"signature", signature}, {"data", ""}}}};
 
     send_request(req);
+
+    // 6. Wait until on_message() confirms authentication
+    auth_cv.wait(lock, [this]()
+                 { return authenticated; });
 }
 
-void Deribit::fetch_balance() {
-    authenticate();                                             
-    std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
+void Deribit::fetch_balance()
+{
+
+    authenticate();
 
     nlohmann::json req = {
         {"jsonrpc", "2.0"},
@@ -131,29 +228,41 @@ void Deribit::fetch_balance() {
     send_request(req);
 }
 
-void Deribit::fetch_orders(const std::string &currency)
+
+void Deribit::fetch_orders(const std::string &symbol,
+                           const std::string &currency,
+                           const std::string &kind,
+                           const std::string &interval,
+                           const nlohmann::json &extra_params)
 {
-    authenticate();                                             
-    std::this_thread::sleep_for(std::chrono::milliseconds(100)); 
+    authenticate(); // Assume this ensures the access token is valid
+
+    std::string channel = "user.orders." + kind + "." + currency + "." + interval;
+
+    nlohmann::json params = {
+        {"channels", {channel}}};
+
+    // Merge extra_params into the 'params' if needed
+    for (auto it = extra_params.begin(); it != extra_params.end(); ++it)
+    {
+        params[it.key()] = it.value();
+    }
 
     nlohmann::json req = {
         {"jsonrpc", "2.0"},
+        {"method", "private/subscribe"},
         {"id", request_id++},
-        {"method", "private/get_order_history_by_currency"},
-        {"params", {
-                       {"currency", currency}, {"kind", "future"}, // optional: future, option, or leave out
-                       {"count", 20},                              // number of results to fetch (max 100)
-                       {"include_old", true},                      // include older orders too
-                       {"include_unfilled", true}                  // also show unfilled orders
-                   }}};
+        {"params", params}};
 
-    send_request(req);
+    send_request(req); // This sends the message over the WebSocket
 }
+
 void Deribit::fetch_ticker(const std::string &symbol) {}
 void Deribit::fetch_order_book(const std::string &symbol) {}
-void Deribit::create_order(const std::string &symbol, const std::string &side, double amount, double price) {
+void Deribit::create_order(const std::string &symbol, const std::string &side, double amount, double price)
+{
     authenticate();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
     std::string method = (side == "buy") ? "private/buy" : "private/sell";
 
     nlohmann::json request = {
@@ -165,9 +274,10 @@ void Deribit::create_order(const std::string &symbol, const std::string &side, d
 
     send_request(request);
 }
-void Deribit::cancel_order(const std::string &order_id) {
+void Deribit::cancel_order(const std::string &order_id)
+{
     authenticate();
-    std::this_thread::sleep_for(std::chrono::milliseconds(100));
+
     nlohmann::json request = {
         {"jsonrpc", "2.0"},
         {"id", request_id++},

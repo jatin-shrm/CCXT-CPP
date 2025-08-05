@@ -21,7 +21,12 @@ public:
     void fetch_balance() override;
     void fetch_ticker(const std::string &symbol) override;
     void fetch_order_book(const std::string &symbol) override;
-    void fetch_orders(const std::string &currency = "BTC") override;
+    void fetch_orders(const std::string &symbol = "",
+                      const std::string &currency = "any",
+                      const std::string &kind = "any",
+                      const std::string &interval = "raw",
+                      const nlohmann::json &extra_params = {});
+
     void create_order(const std::string &symbol, const std::string &side, double amount, double price) override;
     void cancel_order(const std::string &order_id) override;
 
@@ -34,6 +39,16 @@ private:
     std::mutex mtx;
     std::condition_variable cv;
     int request_id = 1;
+
+    std::string access_token = "";
+    long long auth_expires_at = 0;
+
+    // Authentication tracking
+    bool authenticated = false;
+    bool auth_in_progress = false;
+    int last_auth_id = -1;
+    std::mutex auth_mtx;
+    std::condition_variable auth_cv;
 
     void connect();
     void on_open(websocketpp::connection_hdl);
