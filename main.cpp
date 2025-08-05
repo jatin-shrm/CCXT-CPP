@@ -22,13 +22,14 @@ int main()
     // std::cout << "Connected successfully.\n";
 
     std::cout<<"Fetching markets.\n";
-    client.fetch_markets();
+    // client.fetch_markets();
 
     
     // client.create_order("BTC-PERPETUAL", "buy", 10, 20000);
 
-    // client.fetch_orders("BTC");
-    // client.fetch_balance();
+    // client.watch_orders("BTC-PERPETUAL", "BTC", "future", "raw");
+    client.cancel_order("57475137770");
+
 
     // Keep main thread alive to receive messages
     std::this_thread::sleep_for(std::chrono::seconds(10));
