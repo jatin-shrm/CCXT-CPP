@@ -143,7 +143,7 @@ void Deribit::fetch_markets()
         {"jsonrpc", "2.0"},
         {"id", request_id++},
         {"method", "public/get_instruments"},
-        {"params", {{"currency", "BTC"}, {"kind", "future"}}}};
+        {"params", {{"currency", "BTC"}, {"kind", "spot"}, {"expired", false}}}};
     send_request(req);
 }
 
@@ -229,51 +229,151 @@ void Deribit::fetch_balance()
 }
 
 
-void Deribit::fetch_orders(const std::string &symbol,
-                           const std::string &currency,
+void Deribit::fetch_orders(const std::string &currency,
                            const std::string &kind,
-                           const std::string &interval,
+                           const std::string &order_type,
+                           const std::string &extra_state,
                            const nlohmann::json &extra_params)
 {
-    authenticate(); // Assume this ensures the access token is valid
-
-    std::string channel = "user.orders." + kind + "." + currency + "." + interval;
+    authenticate(); // Ensure the token is valid
 
     nlohmann::json params = {
-        {"channels", {channel}}};
+        {"currency", currency},
+        {"kind", kind} // "option" or "future"
+    };
 
-    // Merge extra_params into the 'params' if needed
+    // Optionally add order_type or state filters
+    if (!order_type.empty())
+        params["type"] = order_type;
+    if (!extra_state.empty())
+        params["state"] = extra_state;
+
+    // Merge extra_params
     for (auto it = extra_params.begin(); it != extra_params.end(); ++it)
-    {
         params[it.key()] = it.value();
-    }
 
     nlohmann::json req = {
         {"jsonrpc", "2.0"},
-        {"method", "private/subscribe"},
         {"id", request_id++},
+        {"method", "private/get_order_history_by_currency"},
         {"params", params}};
 
-    send_request(req); // This sends the message over the WebSocket
+    send_request(req);
 }
 
 void Deribit::fetch_ticker(const std::string &symbol) {}
 void Deribit::fetch_order_book(const std::string &symbol) {}
-void Deribit::create_order(const std::string &symbol, const std::string &side, double amount, double price)
-{
-    authenticate();
 
-    std::string method = (side == "buy") ? "private/buy" : "private/sell";
 
-    nlohmann::json request = {
-        {"jsonrpc", "2.0"},
-        {"id", request_id++},
-        {"method", method},
-        {"params", {{"instrument_name", symbol}, {"amount", amount}, {"type", "limit"}, // or "market"
-                    {"price", price}}}};
+void Deribit::create_order(
+    const std::string &symbol,
+    const std::string &type,
+    const std::string &side,
+    double amount,
+    std::optional<double> price,
+    const nlohmann::json &params)
+    {
+        // Construct the request
+        authenticate();
 
-    send_request(request);
+        nlohmann::json request;
+        request["jsonrpc"] = "2.0";
+        request["id"] = request_id++;
+        request["method"] = side == "buy" ? "private/buy" : "private/sell";
+
+        nlohmann::json order_params;
+        order_params["instrument_name"] = symbol;
+        order_params["amount"] = amount;
+
+        std::string order_type = type;
+        std::string trigger = params.contains("trigger") && !params["trigger"].is_null()
+                                  ? params["trigger"].get<std::string>()
+                                  : "last_price";
+
+        std::string timeInForce = params.contains("timeInForce") && !params["timeInForce"].is_null()
+                                      ? params["timeInForce"].get<std::string>()
+                                      : "";
+
+        bool reduceOnly = params.contains("reduceOnly") && !params["reduceOnly"].is_null()
+                              ? params["reduceOnly"].get<bool>()
+                              : false;
+
+        bool postOnly = params.contains("postOnly") && !params["postOnly"].is_null()
+                            ? params["postOnly"].get<bool>()
+                            : false;
+
+        auto trailingAmountIt = params.find("trailingAmount");
+        bool isTrailingAmount = trailingAmountIt != params.end() && !trailingAmountIt->is_null();
+
+        auto stopLossPriceIt = params.find("stopLossPrice");
+        auto takeProfitPriceIt = params.find("takeProfitPrice");
+        bool hasStopLoss = stopLossPriceIt != params.end() && !stopLossPriceIt->is_null();
+        bool hasTakeProfit = takeProfitPriceIt != params.end() && !takeProfitPriceIt->is_null();
+
+        if (hasStopLoss && hasTakeProfit)
+        {
+            throw std::runtime_error("Cannot specify both stopLossPrice and takeProfitPrice.");
+        }
+
+        bool isLimit = (type == "limit");
+        bool isMarket = (type == "market");
+
+        if (isLimit && price.has_value())
+        {
+            order_params["type"] = "limit";
+            order_params["price"] = price.value();
+        }
+        else if (isMarket)
+        {
+            order_params["type"] = "market";
+        }
+
+        if (isTrailingAmount)
+        {
+            order_params["type"] = "trailing_stop";
+            order_params["trigger"] = trigger;
+            order_params["trigger_offset"] = std::stod(trailingAmountIt->get<std::string>());
+        }
+        else if (hasStopLoss || hasTakeProfit)
+        {
+            double triggerPrice = hasStopLoss ? stopLossPriceIt->get<double>() : takeProfitPriceIt->get<double>();
+            order_params["trigger"] = trigger;
+            order_params["trigger_price"] = triggerPrice;
+            if (hasStopLoss)
+            {
+                order_params["type"] = isMarket ? "stop_market" : "stop_limit";
+            }
+            else
+            {
+                order_params["type"] = isMarket ? "take_market" : "take_limit";
+            }
+        }
+
+        if (reduceOnly)
+        {
+            order_params["reduce_only"] = true;
+        }
+        if (postOnly)
+        {
+            order_params["post_only"] = true;
+            order_params["reject_post_only"] = true;
+        }
+        if (!timeInForce.empty())
+        {
+            if (timeInForce == "GTC")
+                order_params["time_in_force"] = "good_til_cancelled";
+            else if (timeInForce == "IOC")
+                order_params["time_in_force"] = "immediate_or_cancel";
+            else if (timeInForce == "FOK")
+                order_params["time_in_force"] = "fill_or_kill";
+        }
+
+        request["params"] = order_params;
+
+        // Send the order over WebSocket
+        send_request(request);
 }
+
 void Deribit::cancel_order(const std::string &order_id)
 {
     authenticate();

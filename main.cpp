@@ -14,24 +14,29 @@ int main()
         {"is_test", true} // true = testnet, false = mainnet
     };
 
-    // Create Deribit client
     Deribit client(config);
 
-    // Connect and fetch markets
-    // client.connect();
-    // std::cout << "Connected successfully.\n";
 
-    std::cout<<"Fetching markets.\n";
     // client.fetch_markets();
 
-    
-    // client.create_order("BTC-PERPETUAL", "buy", 10, 20000);
+    // client.create_order(
+    //     "BTC-6AUG25-112000-C", // symbol
+    //     "limit",               // type
+    //     "buy",                 // side
+    //     1,                     // amount (1 contract)
+    //     0.01,                  // price (in BTC)
+    //     {
+    //         {"post_only", true} // optional: avoid taker fees
+    //     });
+    client.create_order(
+        "BTC_USDT", // symbol
+        "limit",    // type
+        "buy",      // side
+        0.0001,     // amount (minimum trade size)
+        50000,      // price in USDT (must be multiple of tick_size = 1.0)
+        {
+            {"post_only", true}});
 
-    // client.watch_orders("BTC-PERPETUAL", "BTC", "future", "raw");
-    client.cancel_order("57475137770");
-
-
-    // Keep main thread alive to receive messages
     std::this_thread::sleep_for(std::chrono::seconds(10));
 
     std::cout << "Exiting...\n";

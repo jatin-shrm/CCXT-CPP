@@ -25,9 +25,16 @@ public:
                       const std::string &currency = "any",
                       const std::string &kind = "any",
                       const std::string &interval = "raw",
-                      const nlohmann::json &extra_params = {});
+                      const nlohmann::json &extra_params = {}) override;
 
-    void create_order(const std::string &symbol, const std::string &side, double amount, double price) override;
+    void create_order(
+        const std::string &symbol,
+        const std::string &type,
+        const std::string &side,
+        double amount,
+        std::optional<double> price = std::nullopt,
+        const nlohmann::json &params = nlohmann::json::object()) override;
+
     void cancel_order(const std::string &order_id) override;
 
 private:
