@@ -110,9 +110,21 @@ void Deribit::on_message(websocketpp::connection_hdl, message_ptr msg)
     }
 }
 
+std::future<nlohmann::json> Deribit::send_async_request(const std::string &method, const nlohmann::json &params)
+{
+    nlohmann::json request = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", method},
+        {"params", params}};
+
+    return send_request(request);
+}
+
 void Deribit::on_fail(websocketpp::connection_hdl)
 {
     std::cerr << "Connection failed\n";
+    connected = false;
 }
 
 void Deribit::on_close(websocketpp::connection_hdl)
@@ -121,67 +133,71 @@ void Deribit::on_close(websocketpp::connection_hdl)
     connected = false;
 }
 
-void Deribit::send_request(const nlohmann::json &request)
+std::future<nlohmann::json> Deribit::send_request(const nlohmann::json &request)
 {
     if (!is_connected())
     {
         connect();
     }
 
+    int id = request["id"].get<int>();
+    std::promise<nlohmann::json> prom;
+    auto fut = prom.get_future();
+
+    {
+        std::lock_guard<std::mutex> lock(promise_mtx);
+        promises[id] = std::move(prom);
+    }
+
     websocketpp::lib::error_code ec;
-    std::string payload = request.dump();
-    client.send(connection_hdl, payload, websocketpp::frame::opcode::text, ec);
+    client.send(connection_hdl, request.dump(), websocketpp::frame::opcode::text, ec);
+
     if (ec)
     {
-        std::cerr << "Send failed: " << ec.message() << std::endl;
+        throw std::runtime_error("Send failed: " + ec.message());
     }
+
+    return fut;
 }
 
-void Deribit::fetch_markets()
+std::future<nlohmann::json> Deribit::fetch_markets()
 {
     nlohmann::json req = {
         {"jsonrpc", "2.0"},
         {"id", request_id++},
         {"method", "public/get_instruments"},
         {"params", {{"currency", "BTC"}, {"kind", "spot"}, {"expired", false}}}};
-    send_request(req);
+    return send_request(req);
 }
 
-void Deribit::authenticate()
+std::future<nlohmann::json> Deribit::authenticate()
 {
     std::unique_lock<std::mutex> lock(auth_mtx);
-
     long long now = std::chrono::duration_cast<std::chrono::milliseconds>(
                         std::chrono::system_clock::now().time_since_epoch())
                         .count();
 
     if (authenticated && now < auth_expires_at)
     {
-        return;
+        std::promise<nlohmann::json> prom;
+        prom.set_value({{"status", "already_authenticated"}});
+        return prom.get_future();
     }
 
     if (auth_in_progress)
     {
-        auth_cv.wait(lock, [this]()
-                     { return authenticated; });
-        return;
+        auth_cv.wait(lock, [this]() { return authenticated; });
+        std::promise<nlohmann::json> prom;
+        prom.set_value({{"status", "waited_auth"}});
+        return prom.get_future();
     }
 
     auth_in_progress = true;
 
-    if (!is_connected())
-    {
-        connect();
-    }
-
-    // 1. Timestamp and nonce
     std::string timestamp = std::to_string(now);
     std::string nonce = timestamp;
-
-    // 2. Message to sign
     std::string message = timestamp + "\n" + nonce + "\n";
 
-    // 3. HMAC-SHA256 signature
     unsigned char hash[EVP_MAX_MD_SIZE];
     unsigned int len = EVP_MAX_MD_SIZE;
 
@@ -190,33 +206,44 @@ void Deribit::authenticate()
          reinterpret_cast<const unsigned char *>(message.c_str()), message.length(),
          hash, &len);
 
-    // 4. Convert to hex lowercase string
     std::stringstream ss;
     for (unsigned int i = 0; i < len; ++i)
     {
         ss << std::hex << std::setfill('0') << std::setw(2) << (int)hash[i];
     }
-    std::string signature = ss.str();
 
+    std::string signature = ss.str();
     last_auth_id = request_id++;
 
-    // 5. Send the authentication request
     nlohmann::json req = {
         {"jsonrpc", "2.0"},
         {"id", last_auth_id},
         {"method", "public/auth"},
-        {"params", {{"grant_type", "client_signature"}, {"client_id", apiKey}, {"timestamp", now}, {"nonce", nonce}, {"signature", signature}, {"data", ""}}}};
+        {"params", {{"grant_type", "client_signature"},
+                     {"client_id", apiKey},
+                     {"timestamp", now},
+                     {"nonce", nonce},
+                     {"signature", signature},
+                     {"data", ""}}}};
 
-    send_request(req);
+    auto fut = send_request(req);
+    fut.wait();
+    auto response = fut.get();
 
-    // 6. Wait until on_message() confirms authentication
-    auth_cv.wait(lock, [this]()
-                 { return authenticated; });
+    if (response.contains("result") && response["result"].contains("access_token"))
+    {
+        access_token = response["result"]["access_token"];
+        auth_expires_at = now + response["result"].value("expires_in", 0LL) * 1000;
+        authenticated = true;
+    }
+    auth_in_progress = false;
+    auth_cv.notify_all();
+
+    return std::async(std::launch::deferred, [response]() { return response; });
 }
 
-void Deribit::fetch_balance()
+std::future<nlohmann::json> Deribit::fetch_balance()
 {
-
     authenticate();
 
     nlohmann::json req = {
@@ -225,15 +252,14 @@ void Deribit::fetch_balance()
         {"method", "private/get_account_summary"},
         {"params", {{"currency", "BTC"}}}};
 
-    send_request(req);
+    return send_async_request(req);
 }
 
-
-void Deribit::fetch_orders(const std::string &currency,
-                           const std::string &kind,
-                           const std::string &order_type,
-                           const std::string &extra_state,
-                           const nlohmann::json &extra_params)
+std::future<nlohmann::json> Deribit::fetch_orders(const std::string &currency,
+                                                  const std::string &kind,
+                                                  const std::string &order_type,
+                                                  const std::string &extra_state,
+                                                  const nlohmann::json &extra_params)
 {
     authenticate(); // Ensure the token is valid
 
@@ -258,123 +284,110 @@ void Deribit::fetch_orders(const std::string &currency,
         {"method", "private/get_order_history_by_currency"},
         {"params", params}};
 
-    send_request(req);
+    return send_async_request(req);
 }
 
-void Deribit::fetch_ticker(const std::string &symbol) {}
-void Deribit::fetch_order_book(const std::string &symbol) {}
+std::future<nlohmann::json> fetch_ticker(const std::string &symbol) {};
+std::future<nlohmann::json> fetch_order_book(const std::string &symbol) {};
 
-
-void Deribit::create_order(
+std::future<nlohmann::json> Deribit::create_order(
     const std::string &symbol,
     const std::string &type,
     const std::string &side,
     double amount,
     std::optional<double> price,
     const nlohmann::json &params)
+{
+    authenticate();
+
+    nlohmann::json request;
+    request["jsonrpc"] = "2.0";
+    request["id"] = request_id++;
+    request["method"] = side == "buy" ? "private/buy" : "private/sell";
+
+    nlohmann::json order_params;
+    order_params["instrument_name"] = symbol;
+    order_params["amount"] = amount;
+
+    std::string order_type = type;
+    std::string trigger = params.value("trigger", "last_price");
+    std::string timeInForce = params.value("timeInForce", "");
+    bool reduceOnly = params.value("reduceOnly", false);
+    bool postOnly = params.value("postOnly", false);
+
+    auto trailingAmountIt = params.find("trailingAmount");
+    bool isTrailingAmount = trailingAmountIt != params.end() && !trailingAmountIt->is_null();
+
+    auto stopLossPriceIt = params.find("stopLossPrice");
+    auto takeProfitPriceIt = params.find("takeProfitPrice");
+    bool hasStopLoss = stopLossPriceIt != params.end() && !stopLossPriceIt->is_null();
+    bool hasTakeProfit = takeProfitPriceIt != params.end() && !takeProfitPriceIt->is_null();
+
+    if (hasStopLoss && hasTakeProfit)
     {
-        // Construct the request
-        authenticate();
+        throw std::runtime_error("Cannot specify both stopLossPrice and takeProfitPrice.");
+    }
 
-        nlohmann::json request;
-        request["jsonrpc"] = "2.0";
-        request["id"] = request_id++;
-        request["method"] = side == "buy" ? "private/buy" : "private/sell";
+    bool isLimit = (type == "limit");
+    bool isMarket = (type == "market");
 
-        nlohmann::json order_params;
-        order_params["instrument_name"] = symbol;
-        order_params["amount"] = amount;
+    if (isLimit && price.has_value())
+    {
+        order_params["type"] = "limit";
+        order_params["price"] = price.value();
+    }
+    else if (isMarket)
+    {
+        order_params["type"] = "market";
+    }
 
-        std::string order_type = type;
-        std::string trigger = params.contains("trigger") && !params["trigger"].is_null()
-                                  ? params["trigger"].get<std::string>()
-                                  : "last_price";
+    if (isTrailingAmount)
+    {
+        order_params["type"] = "trailing_stop";
+        order_params["trigger"] = trigger;
+        order_params["trigger_offset"] = std::stod(trailingAmountIt->get<std::string>());
+    }
+    else if (hasStopLoss || hasTakeProfit)
+    {
+        double triggerPrice = hasStopLoss ? stopLossPriceIt->get<double>() : takeProfitPriceIt->get<double>();
+        order_params["trigger"] = trigger;
+        order_params["trigger_price"] = triggerPrice;
 
-        std::string timeInForce = params.contains("timeInForce") && !params["timeInForce"].is_null()
-                                      ? params["timeInForce"].get<std::string>()
-                                      : "";
-
-        bool reduceOnly = params.contains("reduceOnly") && !params["reduceOnly"].is_null()
-                              ? params["reduceOnly"].get<bool>()
-                              : false;
-
-        bool postOnly = params.contains("postOnly") && !params["postOnly"].is_null()
-                            ? params["postOnly"].get<bool>()
-                            : false;
-
-        auto trailingAmountIt = params.find("trailingAmount");
-        bool isTrailingAmount = trailingAmountIt != params.end() && !trailingAmountIt->is_null();
-
-        auto stopLossPriceIt = params.find("stopLossPrice");
-        auto takeProfitPriceIt = params.find("takeProfitPrice");
-        bool hasStopLoss = stopLossPriceIt != params.end() && !stopLossPriceIt->is_null();
-        bool hasTakeProfit = takeProfitPriceIt != params.end() && !takeProfitPriceIt->is_null();
-
-        if (hasStopLoss && hasTakeProfit)
+        if (hasStopLoss)
         {
-            throw std::runtime_error("Cannot specify both stopLossPrice and takeProfitPrice.");
+            order_params["type"] = isMarket ? "stop_market" : "stop_limit";
         }
+        else
+        {
+            order_params["type"] = isMarket ? "take_market" : "take_limit";
+        }
+    }
 
-        bool isLimit = (type == "limit");
-        bool isMarket = (type == "market");
+    if (reduceOnly)
+    {
+        order_params["reduce_only"] = true;
+    }
+    if (postOnly)
+    {
+        order_params["post_only"] = true;
+        order_params["reject_post_only"] = true;
+    }
+    if (!timeInForce.empty())
+    {
+        if (timeInForce == "GTC")
+            order_params["time_in_force"] = "good_til_cancelled";
+        else if (timeInForce == "IOC")
+            order_params["time_in_force"] = "immediate_or_cancel";
+        else if (timeInForce == "FOK")
+            order_params["time_in_force"] = "fill_or_kill";
+    }
 
-        if (isLimit && price.has_value())
-        {
-            order_params["type"] = "limit";
-            order_params["price"] = price.value();
-        }
-        else if (isMarket)
-        {
-            order_params["type"] = "market";
-        }
+    request["params"] = order_params;
 
-        if (isTrailingAmount)
-        {
-            order_params["type"] = "trailing_stop";
-            order_params["trigger"] = trigger;
-            order_params["trigger_offset"] = std::stod(trailingAmountIt->get<std::string>());
-        }
-        else if (hasStopLoss || hasTakeProfit)
-        {
-            double triggerPrice = hasStopLoss ? stopLossPriceIt->get<double>() : takeProfitPriceIt->get<double>();
-            order_params["trigger"] = trigger;
-            order_params["trigger_price"] = triggerPrice;
-            if (hasStopLoss)
-            {
-                order_params["type"] = isMarket ? "stop_market" : "stop_limit";
-            }
-            else
-            {
-                order_params["type"] = isMarket ? "take_market" : "take_limit";
-            }
-        }
-
-        if (reduceOnly)
-        {
-            order_params["reduce_only"] = true;
-        }
-        if (postOnly)
-        {
-            order_params["post_only"] = true;
-            order_params["reject_post_only"] = true;
-        }
-        if (!timeInForce.empty())
-        {
-            if (timeInForce == "GTC")
-                order_params["time_in_force"] = "good_til_cancelled";
-            else if (timeInForce == "IOC")
-                order_params["time_in_force"] = "immediate_or_cancel";
-            else if (timeInForce == "FOK")
-                order_params["time_in_force"] = "fill_or_kill";
-        }
-
-        request["params"] = order_params;
-
-        // Send the order over WebSocket
-        send_request(request);
+    return send_async_request(request);
 }
 
-void Deribit::cancel_order(const std::string &order_id)
+std::future<nlohmann::json> Deribit::cancel_order(const std::string &order_id)
 {
     authenticate();
 
@@ -384,5 +397,5 @@ void Deribit::cancel_order(const std::string &order_id)
         {"method", "private/cancel"},
         {"params", {{"order_id", order_id}}}};
 
-    send_request(request);
+    return send_async_request(request);
 }
