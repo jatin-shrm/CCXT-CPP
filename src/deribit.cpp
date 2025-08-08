@@ -674,9 +674,7 @@ nlohmann::json Deribit::create_order(const std::string &symbol, const std::strin
     bool hasTakeProfit = takeProfitPriceIt != params.end() && !takeProfitPriceIt->is_null();
 
     if (hasStopLoss && hasTakeProfit)
-    {
         throw std::runtime_error("Cannot specify both stopLossPrice and takeProfitPrice");
-    }
 
     if (type == "limit" && price.has_value())
     {
@@ -700,13 +698,9 @@ nlohmann::json Deribit::create_order(const std::string &symbol, const std::strin
         order_params["trigger"] = trigger;
         order_params["trigger_price"] = triggerPrice;
         if (hasStopLoss)
-        {
             order_params["type"] = type == "market" ? "stop_market" : "stop_limit";
-        }
         else
-        {
             order_params["type"] = type == "market" ? "take_market" : "take_limit";
-        }
     }
 
     if (reduceOnly)
@@ -727,7 +721,65 @@ nlohmann::json Deribit::create_order(const std::string &symbol, const std::strin
     }
 
     req["params"] = order_params;
-    return send_request_and_wait(req, 30);
+    nlohmann::json response = send_request_and_wait(req, 30);
+
+    nlohmann::json order = response["result"]["order"];
+    nlohmann::json trades = response["result"].contains("trades") ? response["result"]["trades"] : nlohmann::json::array();
+    std::string marketId = order.value("instrument_name", "");
+    int64_t timestamp = order.value("creation_timestamp", 0);
+    int64_t lastUpdate = order.value("last_update_timestamp", 0);
+    std::string id = order.value("order_id", "");
+    std::string priceString = order.contains("price") && !order["price"].is_null() ? order["price"].dump() : "";
+    if (priceString == "\"market_price\"")
+        priceString.clear();
+    std::string averageString = order.contains("average_price") && !order["average_price"].is_null() ? order["average_price"].dump() : "";
+    std::string filledString = order.contains("filled_amount") && !order["filled_amount"].is_null() ? order["filled_amount"].dump() : "";
+    std::string amountString = order.contains("amount") && !order["amount"].is_null() ? order["amount"].dump() : "";
+    std::string cost;
+    if (!filledString.empty() && !averageString.empty())
+        cost = std::to_string(std::stod(filledString) * std::stod(averageString));
+    int64_t lastTradeTimestamp = 0;
+    if (!filledString.empty() && std::stod(filledString) > 0)
+        lastTradeTimestamp = lastUpdate;
+    std::string status = order.value("order_state", "");
+    std::string sideParsed = order.value("direction", "");
+    std::string feeCostString = order.contains("commission") && !order["commission"].is_null() ? order["commission"].dump() : "";
+    nlohmann::json fee = nlohmann::json();
+    if (!feeCostString.empty())
+    {
+        fee["cost"] = std::abs(std::stod(feeCostString));
+        fee["currency"] = "";
+    }
+    std::string rawType = order.value("order_type", "");
+    std::string timeInForceParsed = order.value("time_in_force", "");
+    auto stopPrice = order.contains("stop_price") ? order["stop_price"] : nlohmann::json();
+    bool postOnlyParsed = order.value("post_only", false);
+
+    nlohmann::json parsed;
+    parsed["info"] = order;
+    parsed["id"] = id;
+    parsed["clientOrderId"] = nlohmann::json();
+    parsed["timestamp"] = timestamp;
+    parsed["datetime"] = timestamp ? nlohmann::json(iso8601(timestamp)) : nlohmann::json();
+    parsed["lastTradeTimestamp"] = lastTradeTimestamp ? nlohmann::json(lastTradeTimestamp) : nlohmann::json();
+    parsed["symbol"] = marketId;
+    parsed["type"] = rawType;
+    parsed["timeInForce"] = timeInForceParsed;
+    parsed["postOnly"] = postOnlyParsed;
+    parsed["side"] = sideParsed;
+    parsed["price"] = priceString.empty() ? nlohmann::json() : nlohmann::json(priceString);
+    parsed["stopPrice"] = stopPrice.is_null() ? nlohmann::json() : stopPrice;
+    parsed["triggerPrice"] = stopPrice.is_null() ? nlohmann::json() : stopPrice;
+    parsed["amount"] = amountString.empty() ? nlohmann::json() : nlohmann::json(amountString);
+    parsed["cost"] = cost.empty() ? nlohmann::json() : nlohmann::json(cost);
+    parsed["average"] = averageString.empty() ? nlohmann::json() : nlohmann::json(averageString);
+    parsed["filled"] = filledString.empty() ? nlohmann::json() : nlohmann::json(filledString);
+    parsed["remaining"] = nlohmann::json();
+    parsed["status"] = status;
+    parsed["fee"] = fee.is_null() ? nlohmann::json() : fee;
+    parsed["trades"] = trades;
+
+    return parsed;
 }
 
 nlohmann::json Deribit::cancel_order(const std::string &order_id)
