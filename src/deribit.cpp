@@ -6,6 +6,7 @@
 #include <openssl/evp.h>
 #include <sstream>
 #include <iomanip>
+#include <unordered_set>
 
 Deribit::Deribit(const nlohmann::json &config)
 {
@@ -284,8 +285,120 @@ nlohmann::json Deribit::fetch_markets()
         {"jsonrpc", "2.0"},
         {"id", request_id++},
         {"method", "public/get_instruments"},
-        {"params", {{"currency", "BTC"}, {"kind", "spot"}, {"expired", false}}}};
-    return send_request_and_wait(req, 30);
+        {"params", {{"expired", false}}}};
+
+    nlohmann::json response = send_request_and_wait(req, 30);
+    nlohmann::json instruments = response.value("result", nlohmann::json::array());
+
+    nlohmann::json result = nlohmann::json::array();
+    std::unordered_set<std::string> parsedMarkets;
+
+    for (auto &market : instruments)
+    {
+        std::string kind = market.value("kind", "");
+        bool isSpot = (kind == "spot");
+
+        std::string id = market.value("instrument_name", "");
+        std::string baseId = market.value("base_currency", "");
+        std::string quoteId = market.value("counter_currency", "");
+        std::string settleId = market.value("settlement_currency", "");
+        std::string base = baseId;
+        std::string quote = quoteId;
+        std::string settle = settleId;
+
+        std::string settlementPeriod = market.value("settlement_period", "");
+        bool swap = (settlementPeriod == "perpetual");
+        bool future = (!swap && kind.find("future") != std::string::npos);
+        bool option = (kind.find("option") != std::string::npos);
+        bool isComboMarket = (kind.find("combo") != std::string::npos);
+
+        long long expiry = market.value("expiration_timestamp", 0LL);
+        double strike = NAN;
+        std::string optionType;
+
+        std::string symbol = id;
+        std::string type = "swap";
+        if (future)
+            type = "future";
+        else if (option)
+            type = "option";
+        else if (isSpot)
+            type = "spot";
+
+        if (isSpot)
+        {
+            symbol = base + "/" + quote;
+        }
+        else if (!isComboMarket)
+        {
+            symbol = base + "/" + quote + ":" + settle;
+            if (option || future)
+            {
+                symbol += "-" + std::to_string(expiry);
+                if (option)
+                {
+                    strike = market.value("strike", NAN);
+                    optionType = market.value("option_type", "");
+                    std::string letter = (optionType == "call") ? "C" : "P";
+                    symbol += "-" + std::to_string(strike) + "-" + letter;
+                }
+            }
+        }
+
+        if (parsedMarkets.count(symbol))
+        {
+            continue;
+        }
+        parsedMarkets.insert(symbol);
+
+        double minTradeAmount = market.value("min_trade_amount", NAN);
+        double tickSize = market.value("tick_size", NAN);
+
+        nlohmann::json precision = {
+            {"amount", minTradeAmount},
+            {"price", tickSize}};
+
+        nlohmann::json limits = {
+            {"leverage", {{"min", nullptr}, {"max", nullptr}}},
+            {"amount", {{"min", minTradeAmount}, {"max", nullptr}}},
+            {"price", {{"min", tickSize}, {"max", nullptr}}},
+            {"cost", {{"min", nullptr}, {"max", nullptr}}}};
+
+        nlohmann::json parsedMarket = {
+            {"id", id},
+            {"symbol", symbol},
+            {"base", base},
+            {"quote", quote},
+            {"settle", settle},
+            {"baseId", baseId},
+            {"quoteId", quoteId},
+            {"settleId", settleId},
+            {"type", type},
+            {"spot", isSpot},
+            {"margin", false},
+            {"swap", swap},
+            {"future", future},
+            {"option", option},
+            {"active", market.value("is_active", true)},
+            {"contract", !isSpot},
+            {"linear", (settle == quote)},
+            {"inverse", (settle != quote)},
+            {"taker", market.value("taker_commission", NAN)},
+            {"maker", market.value("maker_commission", NAN)},
+            {"contractSize", market.value("contract_size", NAN)},
+            {"expiry", expiry},
+            {"expiryDatetime", expiry > 0 ? std::to_string(expiry) : ""},
+            {"strike", std::isnan(strike) ? nullptr : nlohmann::json(strike)},
+            {"optionType", optionType.empty() ? nullptr : nlohmann::json(optionType)},
+            {"precision", precision},
+            {"limits", limits},
+            {"created", market.value("creation_timestamp", 0LL)},
+            {"info", market}};
+
+        result.push_back(parsedMarket);
+    }
+
+    return result;
 }
 
 nlohmann::json Deribit::fetch_balance()
