@@ -279,7 +279,32 @@ void Deribit::authenticate()
     }
 }
 
-nlohmann::json Deribit::fetch_markets()
+std::string iso8601(int64_t timestamp)
+{
+    if (timestamp < 0)
+    {
+        return "";
+    }
+
+    try
+    {
+        std::time_t seconds = timestamp / 1000;
+        int milliseconds = timestamp % 1000;
+
+        std::ostringstream oss;
+        oss << std::put_time(std::gmtime(&seconds), "%Y-%m-%dT%H:%M:%S")
+            << "." << std::setw(3) << std::setfill('0') << milliseconds
+            << "Z";
+
+        return oss.str();
+    }
+    catch (...)
+    {
+        return "";
+    }
+}
+
+nlohmann::json Deribit::fetch_markets(const nlohmann::json &params)
 {
     nlohmann::json req = {
         {"jsonrpc", "2.0"},
@@ -467,14 +492,85 @@ nlohmann::json Deribit::fetch_ticker(const std::string &symbol)
     return send_request_and_wait(req, 30);
 }
 
-nlohmann::json Deribit::fetch_order_book(const std::string &symbol)
+nlohmann::json Deribit::fetch_order_book(const std::string &symbol, const nlohmann::json &params)
 {
     nlohmann::json req = {
         {"jsonrpc", "2.0"},
         {"id", request_id++},
         {"method", "public/get_order_book"},
         {"params", {{"instrument_name", symbol}, {"depth", 5}}}};
-    return send_request_and_wait(req, 30);
+
+    nlohmann::json response = send_request_and_wait(req, 30);
+    nlohmann::json orderbook = response.value("result", nlohmann::json::object());
+
+    auto parse_bid_ask = [&](const nlohmann::json &bidask, int priceKey = 0, int amountKey = 1, int countOrIdKey = 2)
+    {
+        nlohmann::json entry = nlohmann::json::array();
+        double price = (bidask.is_array() && bidask.size() > priceKey && !bidask[priceKey].is_null())
+                           ? bidask[priceKey].get<double>()
+                           : 0.0;
+        double amount = (bidask.is_array() && bidask.size() > amountKey && !bidask[amountKey].is_null())
+                            ? bidask[amountKey].get<double>()
+                            : 0.0;
+        entry.push_back(price);
+        entry.push_back(amount);
+        if (bidask.is_array() && bidask.size() > countOrIdKey && !bidask[countOrIdKey].is_null())
+        {
+            entry.push_back(bidask[countOrIdKey]);
+        }
+        return entry;
+    };
+
+    auto parse_bids_asks = [&](const nlohmann::json &bidasks)
+    {
+        nlohmann::json result = nlohmann::json::array();
+        if (bidasks.is_array())
+        {
+            for (auto &bidask : bidasks)
+            {
+                result.push_back(parse_bid_ask(bidask));
+            }
+        }
+        return result;
+    };
+
+    nlohmann::json bids = parse_bids_asks(orderbook.value("bids", nlohmann::json::array()));
+    nlohmann::json asks = parse_bids_asks(orderbook.value("asks", nlohmann::json::array()));
+
+    auto sort_desc = [](nlohmann::json arr)
+    {
+        std::sort(arr.begin(), arr.end(), [](const nlohmann::json &a, const nlohmann::json &b)
+                  { return a[0].get<double>() > b[0].get<double>(); });
+        return arr;
+    };
+
+    auto sort_asc = [](nlohmann::json arr)
+    {
+        std::sort(arr.begin(), arr.end(), [](const nlohmann::json &a, const nlohmann::json &b)
+                  { return a[0].get<double>() < b[0].get<double>(); });
+        return arr;
+    };
+
+    bids = sort_desc(bids);
+    asks = sort_asc(asks);
+
+    std::cout << orderbook.dump(4) << std::endl;
+
+    int64_t ts = orderbook.value("timestamp", int64_t(0));
+    if (ts > 0 && ts < 10000000000LL)
+    {
+        ts *= 1000;
+    }
+
+    nlohmann::json result;
+    result["symbol"] = symbol;
+    result["bids"] = bids;
+    result["asks"] = asks;
+    result["timestamp"] = ts;
+    result["datetime"] = ts ? nlohmann::json(iso8601(ts)) : nlohmann::json();
+    result["nonce"] = nullptr;
+
+    return result;
 }
 
 nlohmann::json Deribit::create_order(const std::string &symbol, const std::string &type, const std::string &side, double amount, std::optional<double> price, const nlohmann::json &params)
