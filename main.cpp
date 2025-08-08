@@ -28,14 +28,16 @@ int main()
     //     {
     //         {"post_only", true} // optional: avoid taker fees
     //     });
-    client.create_order(
-        "BTC_USDT", // symbol
-        "limit",    // type
-        "buy",      // side
-        0.0001,     // amount (minimum trade size)
-        50000,      // price in USDT (must be multiple of tick_size = 1.0)
-        {
-            {"post_only", true}});
+    nlohmann::json balance = client.fetch_markets();
+    std::cout << "Balance: " << balance.dump(4) << std::endl;
+    // client.create_order(
+    //     "BTC_USDT", // symbol
+    //     "limit",    // type
+    //     "buy",      // side
+    //     0.0001,     // amount (minimum trade size)
+    //     50000,      // price in USDT (must be multiple of tick_size = 1.0)
+    //     {
+    //         {"post_only", true}});
 
     std::this_thread::sleep_for(std::chrono::seconds(10));
 
