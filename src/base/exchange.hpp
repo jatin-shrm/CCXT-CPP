@@ -13,7 +13,7 @@ public:
 
     virtual void authenticate() = 0;
     virtual nlohmann::json fetch_markets() = 0;
-    virtual nlohmann::json fetch_balance() = 0;
+    virtual nlohmann::json fetch_balance(const nlohmann::json &params = nlohmann::json::object()) = 0;
     virtual nlohmann::json fetch_ticker(const std::string &symbol) = 0;
     virtual nlohmann::json fetch_order_book(const std::string &symbol) = 0;
     virtual nlohmann::json fetch_orders(const std::string &symbol = "", const std::string &currency = "any", const std::string &kind = "any", const std::string &interval = "raw", const nlohmann::json &extra_params = {}) = 0;

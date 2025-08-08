@@ -401,15 +401,38 @@ nlohmann::json Deribit::fetch_markets()
     return result;
 }
 
-nlohmann::json Deribit::fetch_balance()
+nlohmann::json Deribit::fetch_balance(const nlohmann::json &params)
 {
     authenticate();
+
+    std::string currencyCode = "BTC";
+    if (params.contains("code") && params["code"].is_string())
+    {
+        currencyCode = params["code"].get<std::string>();
+    }
+
     nlohmann::json req = {
         {"jsonrpc", "2.0"},
         {"id", request_id++},
         {"method", "private/get_account_summary"},
-        {"params", {{"currency", "BTC"}}}};
-    return send_request_and_wait(req, 30);
+        {"params", {{"currency", currencyCode}}}};
+
+    nlohmann::json response = send_request_and_wait(req, 30);
+    nlohmann::json balance = response.value("result", nlohmann::json::object());
+
+    nlohmann::json result;
+    result["info"] = balance;
+
+    std::string currencyId = balance.value("currency", "");
+
+    nlohmann::json account;
+    account["free"] = balance.value("available_funds", 0.0);
+    account["used"] = balance.value("maintenance_margin", 0.0);
+    account["total"] = balance.value("equity", 0.0);
+
+    result[currencyCode] = account;
+
+    return result;
 }
 
 nlohmann::json Deribit::fetch_orders(const std::string &symbol, const std::string &currency, const std::string &kind, const std::string &interval, const nlohmann::json &extra_params)

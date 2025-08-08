@@ -28,7 +28,7 @@ int main()
     //     {
     //         {"post_only", true} // optional: avoid taker fees
     //     });
-    nlohmann::json balance = client.fetch_markets();
+    nlohmann::json balance = client.fetch_balance({{"code", "ETH"}});
     std::cout << "Balance: " << balance.dump(4) << std::endl;
     // client.create_order(
     //     "BTC_USDT", // symbol
