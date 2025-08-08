@@ -489,7 +489,85 @@ nlohmann::json Deribit::fetch_ticker(const std::string &symbol)
         {"id", request_id++},
         {"method", "public/ticker"},
         {"params", {{"instrument_name", symbol}}}};
-    return send_request_and_wait(req, 30);
+
+    nlohmann::json response = send_request_and_wait(req, 30);
+    nlohmann::json ticker = response.value("result", nlohmann::json::object());
+
+    int64_t timestamp = 0;
+    if (ticker.contains("timestamp") && ticker["timestamp"].is_number_integer())
+        timestamp = ticker["timestamp"].get<int64_t>();
+    else if (ticker.contains("creation_timestamp") && ticker["creation_timestamp"].is_number_integer())
+        timestamp = ticker["creation_timestamp"].get<int64_t>();
+
+    std::string last;
+    if (ticker.contains("last_price") && !ticker["last_price"].is_null())
+        last = std::to_string(ticker["last_price"].get<double>());
+    else if (ticker.contains("last") && !ticker["last"].is_null())
+        last = std::to_string(ticker["last"].get<double>());
+
+    nlohmann::json stats = ticker.contains("stats") && ticker["stats"].is_object()
+                               ? ticker["stats"]
+                               : ticker;
+
+    std::string high;
+    if (stats.contains("high") && !stats["high"].is_null())
+        high = std::to_string(stats["high"].get<double>());
+    else if (stats.contains("max_price") && !stats["max_price"].is_null())
+        high = std::to_string(stats["max_price"].get<double>());
+
+    std::string low;
+    if (stats.contains("low") && !stats["low"].is_null())
+        low = std::to_string(stats["low"].get<double>());
+    else if (stats.contains("min_price") && !stats["min_price"].is_null())
+        low = std::to_string(stats["min_price"].get<double>());
+
+    std::string bid;
+    if (ticker.contains("best_bid_price") && !ticker["best_bid_price"].is_null())
+        bid = std::to_string(ticker["best_bid_price"].get<double>());
+    else if (ticker.contains("bid_price") && !ticker["bid_price"].is_null())
+        bid = std::to_string(ticker["bid_price"].get<double>());
+
+    std::string ask;
+    if (ticker.contains("best_ask_price") && !ticker["best_ask_price"].is_null())
+        ask = std::to_string(ticker["best_ask_price"].get<double>());
+    else if (ticker.contains("ask_price") && !ticker["ask_price"].is_null())
+        ask = std::to_string(ticker["ask_price"].get<double>());
+
+    std::string bidVolume;
+    if (ticker.contains("best_bid_amount") && !ticker["best_bid_amount"].is_null())
+        bidVolume = std::to_string(ticker["best_bid_amount"].get<double>());
+
+    std::string askVolume;
+    if (ticker.contains("best_ask_amount") && !ticker["best_ask_amount"].is_null())
+        askVolume = std::to_string(ticker["best_ask_amount"].get<double>());
+
+    std::string quoteVolume;
+    if (stats.contains("volume") && !stats["volume"].is_null())
+        quoteVolume = std::to_string(stats["volume"].get<double>());
+
+    nlohmann::json result;
+    result["symbol"] = symbol;
+    result["timestamp"] = timestamp;
+    result["datetime"] = timestamp ? nlohmann::json(iso8601(timestamp)) : nlohmann::json();
+    result["high"] = high.empty() ? nlohmann::json() : nlohmann::json(high);
+    result["low"] = low.empty() ? nlohmann::json() : nlohmann::json(low);
+    result["bid"] = bid.empty() ? nlohmann::json() : nlohmann::json(bid);
+    result["bidVolume"] = bidVolume.empty() ? nlohmann::json() : nlohmann::json(bidVolume);
+    result["ask"] = ask.empty() ? nlohmann::json() : nlohmann::json(ask);
+    result["askVolume"] = askVolume.empty() ? nlohmann::json() : nlohmann::json(askVolume);
+    result["vwap"] = nlohmann::json();
+    result["open"] = nlohmann::json();
+    result["close"] = last.empty() ? nlohmann::json() : nlohmann::json(last);
+    result["last"] = last.empty() ? nlohmann::json() : nlohmann::json(last);
+    result["previousClose"] = nlohmann::json();
+    result["change"] = nlohmann::json();
+    result["percentage"] = nlohmann::json();
+    result["average"] = nlohmann::json();
+    result["baseVolume"] = nlohmann::json();
+    result["quoteVolume"] = quoteVolume.empty() ? nlohmann::json() : nlohmann::json(quoteVolume);
+    result["info"] = ticker;
+
+    return result;
 }
 
 nlohmann::json Deribit::fetch_order_book(const std::string &symbol, const nlohmann::json &params)

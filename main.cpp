@@ -28,8 +28,8 @@ int main()
     //     {
     //         {"post_only", true} // optional: avoid taker fees
     //     });
-    nlohmann::json order_book = client.fetch_order_book("BTC-10AUG25-112000-C");
-    std::cout << "Order Book: " << order_book.dump(4) << std::endl;
+    nlohmann::json order_book = client.fetch_ticker("BTC-10AUG25-112000-C");
+    std::cout << "Ticker Book: " << order_book.dump(4) << std::endl;
     // client.create_order(
     //     "BTC_USDT", // symbol
     //     "limit",    // type
