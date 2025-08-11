@@ -304,6 +304,26 @@ std::string iso8601(int64_t timestamp)
     }
 }
 
+nlohmann::json Deribit::load_markets(bool reload, const nlohmann::json &params)
+{
+    if (!reload && !markets.empty() && !markets_by_id.empty())
+    {
+        return markets;
+    }
+
+    nlohmann::json fresh_markets = fetch_markets(params);
+
+    this->markets = fresh_markets;
+    this->markets_by_id.clear();
+
+    for (const auto &market : fresh_markets)
+    {
+        std::string id = market["id"];
+        markets_by_id[id] = market;
+    }
+    return fresh_markets;
+}
+
 nlohmann::json Deribit::fetch_markets(const nlohmann::json &params)
 {
     nlohmann::json req = {

@@ -26,7 +26,12 @@ public:
     Deribit(const nlohmann::json &config);
     ~Deribit();
 
+    nlohmann::json markets;
+    std::unordered_map<std::string, nlohmann::json> markets_by_id;
+
     void authenticate() override;
+
+    nlohmann::json load_markets(bool reload = false, const nlohmann::json &params = nlohmann::json::object()) override;
     nlohmann::json fetch_markets(const nlohmann::json &params = nlohmann::json::object()) override;
     nlohmann::json fetch_balance(const nlohmann::json &params = nlohmann::json::object()) override;
     nlohmann::json fetch_ticker(const std::string &symbol) override;
@@ -62,12 +67,12 @@ private:
     std::unordered_map<int, ResponseHandler> pending_requests;
 
     void connect();
+    bool is_connected();
     void on_open(websocketpp::connection_hdl);
-    void on_message(websocketpp::connection_hdl, message_ptr msg);
     void on_fail(websocketpp::connection_hdl);
     void on_close(websocketpp::connection_hdl);
     void send_request(const nlohmann::json &request);
-    nlohmann::json send_request_and_wait(const nlohmann::json &request, int timeout_seconds = 30);
-    bool is_connected();
+    void on_message(websocketpp::connection_hdl, message_ptr msg);
     std::string generate_signature(const std::string &timestamp, const std::string &nonce);
+    nlohmann::json send_request_and_wait(const nlohmann::json &request, int timeout_seconds = 30);
 };

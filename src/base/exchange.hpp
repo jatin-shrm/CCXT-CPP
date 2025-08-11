@@ -12,6 +12,8 @@ public:
     virtual ~Exchange() = default;
 
     virtual void authenticate() = 0;
+
+    virtual nlohmann::json load_markets(bool reload = false, const nlohmann::json &params = nlohmann::json::object()) = 0;
     virtual nlohmann::json fetch_markets(const nlohmann::json &params = nlohmann::json::object()) = 0;
     virtual nlohmann::json fetch_balance(const nlohmann::json &params = nlohmann::json::object()) = 0;
     virtual nlohmann::json fetch_ticker(const std::string &symbol) = 0;
