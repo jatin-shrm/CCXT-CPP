@@ -480,26 +480,28 @@ nlohmann::json Deribit::fetch_balance(const nlohmann::json &params)
     return result;
 }
 
-nlohmann::json Deribit::fetch_orders(const std::string &symbol, const std::string &currency, const std::string &kind, const std::string &interval, const nlohmann::json &extra_params)
+nlohmann::json Deribit::fetch_orders(
+    const std::string &symbol,
+    int64_t since,
+    int limit,
+    const nlohmann::json &params)
 {
+    // Authenticate like other functions
     authenticate();
-    nlohmann::json params = {
-        {"currency", currency},
-        {"kind", kind}};
 
-    if (!symbol.empty())
-        params["instrument_name"] = symbol;
-    for (auto it = extra_params.begin(); it != extra_params.end(); ++it)
-    {
-        params[it.key()] = it.value();
-    }
+    // Prepare a structured JSON error response
+    nlohmann::json result;
+    result["info"] = {
+        {"error", true},
+        {"message", "Deribit exchange does not support fetch_orders function"}};
 
-    nlohmann::json req = {
-        {"jsonrpc", "2.0"},
-        {"id", request_id++},
-        {"method", "private/get_order_history_by_currency"},
-        {"params", params}};
-    return send_request_and_wait(req, 30);
+    // Keep fields similar to a normal fetch_orders response
+    result["orders"] = nlohmann::json::array();
+    result["symbol"] = symbol;
+    result["since"] = since;
+    result["limit"] = limit;
+
+    return result;
 }
 
 nlohmann::json Deribit::fetch_ticker(const std::string &symbol)

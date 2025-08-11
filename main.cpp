@@ -30,7 +30,7 @@ int main()
     //     });
     // nlohmann::json order_book = client.fetch_ticker("BTC-10AUG25-112000-C");
     
-    // nlohmann::json order_book=client.create_order(
+    // nlohmann::json create_order=client.create_order(
     //     "BTC_USDT", // symbol
     //     "limit",    // type
     //     "buy",      // side
@@ -39,9 +39,17 @@ int main()
     //     {
     //         {"post_only", true}});
 
-    // std::cout << "Ticker Book: " << order_book.dump(4) << std::endl;
-    nlohmann::json cancel_order= client.cancel_order("BTC_USDT-293581024"); // Replace with actual order ID
-    std::cout << "Cancel Order Response: " << cancel_order.dump(4);
+    // std::cout << "Create Order: " << create_order.dump(4) << std::endl;
+    // nlohmann::json cancel_order= client.cancel_order("BTC_USDT-301468432"); // Replace with actual order ID
+
+    nlohmann::json orders = client.fetch_orders(
+        "BTC_USDT", // symbol
+        0,          // since
+        10,         // limit
+        {}          // params
+    );
+    std::cout << "Orders: " << orders.dump(4) << std::endl;
+    // std::cout << "Cancel Order Response: " << cancel_order.dump(4);
     std::this_thread::sleep_for(std::chrono::seconds(10));
 
     std::cout << "Exiting...\n";

@@ -36,7 +36,11 @@ public:
     nlohmann::json fetch_balance(const nlohmann::json &params = nlohmann::json::object()) override;
     nlohmann::json fetch_ticker(const std::string &symbol) override;
     nlohmann::json fetch_order_book(const std::string &symbol, const nlohmann::json &params = nlohmann::json::object()) override;
-    nlohmann::json fetch_orders(const std::string &symbol = "", const std::string &currency = "any", const std::string &kind = "any", const std::string &interval = "raw", const nlohmann::json &extra_params = {}) override;
+    nlohmann::json fetch_orders(
+        const std::string &symbol = "",
+        int64_t since = 0,
+        int limit = 0,
+        const nlohmann::json &params = {}) override;
 
     nlohmann::json create_order(const std::string &symbol, const std::string &type, const std::string &side, double amount, std::optional<double> price = std::nullopt, const nlohmann::json &params = nlohmann::json::object()) override;
 
