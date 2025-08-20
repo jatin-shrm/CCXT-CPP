@@ -40,7 +40,7 @@ public:
         const std::string &symbol = "",
         int64_t since = 0,
         int limit = 0,
-        const nlohmann::json &params = {}) override;
+        const nlohmann::json &params = nlohmann::json::object()) override;
     nlohmann::json fetch_order(const std::string &id, const std::string &symbol = "", const nlohmann::json &params = nlohmann::json::object()) override;
     nlohmann::json create_order(const std::string &symbol, const std::string &type, const std::string &side, double amount, std::optional<double> price = std::nullopt, const nlohmann::json &params = nlohmann::json::object()) override;
     nlohmann::json cancel_order(const std::string &id, const std::string &symbol = "", const nlohmann::json &params = nlohmann::json::object()) override;
