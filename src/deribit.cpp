@@ -504,6 +504,90 @@ nlohmann::json Deribit::fetch_orders(
     return result;
 }
 
+nlohmann::json Deribit::fetch_order(const std::string &id, const std::string &symbol, const nlohmann::json &params)
+{
+    load_markets(false, {});
+    authenticate();
+
+    nlohmann::json req;
+    req["jsonrpc"] = "2.0";
+    req["id"] = request_id++;
+    req["method"] = "private/get_order_state";
+    req["params"] = {{"order_id", id}};
+    for (auto &el : params.items())
+    {
+        req["params"][el.key()] = el.value();
+    }
+
+    nlohmann::json response = send_request_and_wait(req, 30);
+    nlohmann::json order = response.value("result", nlohmann::json::object());
+
+    std::string marketId = order.value("instrument_name", "");
+    int64_t timestamp = order.value("creation_timestamp", 0);
+    int64_t lastUpdate = order.value("last_update_timestamp", 0);
+    std::string orderId = order.value("order_id", "");
+
+    std::string priceString = order.contains("price") && !order["price"].is_null() ? order["price"].dump() : "";
+    if (priceString == "\"market_price\"")
+        priceString.clear();
+
+    std::string averageString = order.contains("average_price") && !order["average_price"].is_null() ? order["average_price"].dump() : "";
+    std::string filledString = order.contains("filled_amount") && !order["filled_amount"].is_null() ? order["filled_amount"].dump() : "";
+    std::string amountString = order.contains("amount") && !order["amount"].is_null() ? order["amount"].dump() : "";
+
+    std::string cost;
+    if (!filledString.empty() && !averageString.empty())
+        cost = std::to_string(std::stod(filledString) * std::stod(averageString));
+
+    int64_t lastTradeTimestamp = 0;
+    if (!filledString.empty() && std::stod(filledString) > 0)
+        lastTradeTimestamp = lastUpdate;
+
+    std::string status = order.value("order_state", "");
+    std::string side = order.value("direction", "");
+    std::transform(side.begin(), side.end(), side.begin(), ::tolower);
+
+    std::string feeCostString = order.contains("commission") && !order["commission"].is_null() ? order["commission"].dump() : "";
+    nlohmann::json fee = nlohmann::json();
+    if (!feeCostString.empty())
+    {
+        fee["cost"] = std::abs(std::stod(feeCostString));
+        fee["currency"] = ""; // could be set to market base if available
+    }
+
+    std::string rawType = order.value("order_type", "");
+    std::string timeInForceParsed = order.value("time_in_force", "");
+    auto stopPrice = order.contains("stop_price") ? order["stop_price"] : nlohmann::json();
+    bool postOnlyParsed = order.value("post_only", false);
+    nlohmann::json trades = order.contains("trades") ? order["trades"] : nlohmann::json::array();
+
+    nlohmann::json parsed;
+    parsed["info"] = order;
+    parsed["id"] = orderId;
+    parsed["clientOrderId"] = nlohmann::json();
+    parsed["timestamp"] = timestamp;
+    parsed["datetime"] = timestamp ? nlohmann::json(iso8601(timestamp)) : nlohmann::json();
+    parsed["lastTradeTimestamp"] = lastTradeTimestamp ? nlohmann::json(lastTradeTimestamp) : nlohmann::json();
+    parsed["symbol"] = marketId;
+    parsed["type"] = rawType;
+    parsed["timeInForce"] = timeInForceParsed;
+    parsed["postOnly"] = postOnlyParsed;
+    parsed["side"] = side;
+    parsed["price"] = priceString.empty() ? nlohmann::json() : nlohmann::json(priceString);
+    parsed["triggerPrice"] = stopPrice.is_null() ? nlohmann::json() : stopPrice;
+    parsed["amount"] = amountString.empty() ? nlohmann::json() : nlohmann::json(amountString);
+    parsed["cost"] = cost.empty() ? nlohmann::json() : nlohmann::json(cost);
+    parsed["average"] = averageString.empty() ? nlohmann::json() : nlohmann::json(averageString);
+    parsed["filled"] = filledString.empty() ? nlohmann::json() : nlohmann::json(filledString);
+    parsed["remaining"] = nlohmann::json();
+    parsed["status"] = status;
+    parsed["fee"] = fee.is_null() ? nlohmann::json() : fee;
+    parsed["trades"] = trades;
+
+    return parsed;
+}
+
+
 nlohmann::json Deribit::fetch_ticker(const std::string &symbol)
 {
     nlohmann::json req = {
