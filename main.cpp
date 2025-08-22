@@ -54,7 +54,7 @@ int main()
     try
     {
         // Subscribe to order updates
-        client.watch_orders(orderHandler, "BTC_USDT", 0, 0, {{"currency", "BTC"}, {"kind", "future"}, {"interval", "raw"}});
+        client.watch_orders(orderHandler);
 
         std::cout << "Subscribed to order updates. Waiting for messages...\n";
 
