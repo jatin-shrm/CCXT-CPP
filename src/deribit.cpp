@@ -107,6 +107,16 @@ void Deribit::on_message(websocketpp::connection_hdl, message_ptr msg)
                 handler.cv.notify_one();
             }
         }
+        else if (response.contains("method") && response["method"] == "subscription")
+        {
+            auto params = response["params"];
+            std::string channel = params["channel"];
+
+            if (subscription_handlers.find(channel) != subscription_handlers.end())
+            {
+                subscription_handlers[channel](params["data"]);
+            }
+        }
         else if (response.contains("error"))
         {
             std::cerr << "Deribit error: " << response["error"].dump() << std::endl;
@@ -480,11 +490,7 @@ nlohmann::json Deribit::fetch_balance(const nlohmann::json &params)
     return result;
 }
 
-nlohmann::json Deribit::fetch_orders(
-    const std::string &symbol,
-    int64_t since,
-    int limit,
-    const nlohmann::json &params)
+nlohmann::json Deribit::fetch_orders(const std::string &symbol, int64_t since, int limit, const nlohmann::json &params)
 {
     // Authenticate like other functions
     authenticate();
@@ -586,7 +592,6 @@ nlohmann::json Deribit::fetch_order(const std::string &id, const std::string &sy
 
     return parsed;
 }
-
 
 nlohmann::json Deribit::fetch_ticker(const std::string &symbol)
 {
@@ -961,4 +966,25 @@ nlohmann::json Deribit::cancel_order(const std::string &id, const std::string &s
     parsed["trades"] = trades;
 
     return parsed;
+}
+
+void Deribit::watch_orders(std::function<void(const nlohmann::json &)> handler, const std::string &symbol, int64_t since, int limit, const nlohmann::json &params)
+{
+    authenticate();
+
+    std::string currency = params.value("currency", "any");
+    std::string interval = params.value("interval", "raw");
+    std::string kind = params.value("kind", "any");
+
+    std::string channel = "user.orders." + kind + "." + currency + "." + interval;
+
+    nlohmann::json req = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", "private/subscribe"},
+        {"params", {{"channels", {channel}}}}};
+
+    subscription_handlers[channel] = handler;
+
+    send_request(req);
 }
