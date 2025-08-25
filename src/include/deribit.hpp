@@ -42,6 +42,13 @@ public:
     nlohmann::json cancel_order(const std::string &id, const std::string &symbol = "", const nlohmann::json &params = nlohmann::json::object()) override;
 
     void watch_orders(std::function<void(const nlohmann::json &)> handler, const std::string &symbol = "", int64_t since = 0, int limit = 0, const nlohmann::json &params = nlohmann::json::object()) override;
+    void watch_order_book(
+        std::function<void(const nlohmann::json &)> handler,
+        const std::string &symbol,
+        int limit = 0,
+        const nlohmann::json &params = nlohmann::json::object()
+    ) override;
+    
 
 private:
     bool is_test;

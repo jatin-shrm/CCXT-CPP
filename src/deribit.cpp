@@ -988,3 +988,45 @@ void Deribit::watch_orders(std::function<void(const nlohmann::json &)> handler, 
 
     send_request(req);
 }
+
+void Deribit::watch_order_book(
+    std::function<void(const nlohmann::json &)> handler,
+    const std::string &symbol,
+    int limit,
+    const nlohmann::json &params)
+{
+
+    std::string interval = params.value("interval", "100ms");
+    bool useDepthEndpoint = params.value("useDepthEndpoint", false);
+    std::string channel;
+
+
+    if (useDepthEndpoint)
+    {
+        std::string depth = params.value("depth", "20");
+        std::string group = params.value("group", "none");
+        channel = "book." + symbol + "." + group + "." + depth + "." + interval;
+    }
+    else
+    {
+        channel = "book." + symbol + "." + interval;
+    }
+
+    if (interval == "raw")
+    {
+        std::cout << "Raw interval detected, authenticating..." << std::endl;
+        authenticate();
+    }
+
+    // Prepare subscription request
+    nlohmann::json req = {
+        {"jsonrpc", "2.0"},
+        {"id", request_id++},
+        {"method", "public/subscribe"},
+        {"params", {{"channels", {channel}}}}};
+
+    subscription_handlers[channel] = handler;
+
+    send_request(req);
+    std::cout << "Subscription request sent" << std::endl;
+}

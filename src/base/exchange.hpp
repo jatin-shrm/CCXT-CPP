@@ -24,4 +24,9 @@ public:
     virtual nlohmann::json cancel_order(const std::string &id, const std::string &symbol = "", const nlohmann::json &params = nlohmann::json::object()) = 0;
 
     virtual void watch_orders(std::function<void(const nlohmann::json &)> handler, const std::string &symbol = "", int64_t since = 0, int limit = 0, const nlohmann::json &params = nlohmann::json::object()) = 0;
+    virtual void watch_order_book(
+        std::function<void(const nlohmann::json &)> handler,
+        const std::string &symbol,
+        int limit = 0,
+        const nlohmann::json &params = nlohmann::json::object()) = 0;
 };
