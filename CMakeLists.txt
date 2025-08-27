@@ -21,9 +21,19 @@ add_library(deribit
 target_include_directories(deribit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/src/include)
 
 add_executable(main main.cpp)
+add_executable(test_deribit test/test_deribit.cpp)
 
 target_link_libraries(
     main
+    PRIVATE
+    deribit
+    OpenSSL::SSL
+    OpenSSL::Crypto
+    Boost::system
+    Threads::Threads
+)
+target_link_libraries(
+    test_deribit
     PRIVATE
     deribit
     OpenSSL::SSL
