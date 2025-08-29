@@ -381,185 +381,7 @@ public:
         }
     }
     
-    bool test_watch_orders() {
-        cout << "Testing watch_orders()" << endl;
-        
-        try {
-            bool subscription_successful = false;
-            bool received_valid_data = false;
-            bool handler_called = false;
-            nlohmann::json received_data;
-            
-            // Define a handler function similar to main.cpp
-            auto orderHandler = [&](const nlohmann::json &order) {
-                handler_called = true;
-                received_data = order;
-                
-                if (!order.empty()) {
-                    received_valid_data = true;
-                }
-                
-                cout << "Order Update Received:" << endl;
-                cout << "ID: " << order.value("order_id", "N/A") << endl;
-                cout << "Instrument: " << order.value("instrument_name", "N/A") << endl;
-                cout << "Direction: " << order.value("direction", "N/A") << endl;
-                cout << "Price: " << order.value("price", 0.0) << endl;
-                cout << "Amount: " << order.value("amount", 0.0) << endl;
-                cout << "Filled: " << order.value("filled_amount", 0.0) << endl;
-                cout << "State: " << order.value("order_state", "N/A") << endl;
-                cout << "----------------------------------------" << endl;
-            };
-            
-            try {
-                // Subscribe to order updates similar to main.cpp
-                client->watch_orders(orderHandler);
-                subscription_successful = true;
-                log_test_result("watch_orders - subscription setup", true);
-                
-                cout << "Subscribed to order updates. Waiting for messages (5 seconds)..." << endl;
-                this_thread::sleep_for(chrono::seconds(5));
-                
-            } catch (const exception& e) {
-                string error_msg = e.what();
-                if (error_msg.find("invalid_credentials") != string::npos || 
-                    error_msg.find("Authentication failed") != string::npos) {
-                    log_test_result("watch_orders - subscription setup", false, 
-                                  "Authentication failed - requires valid API credentials");
-                    return false;
-                }
-                log_test_result("watch_orders - subscription setup", false, 
-                              string("Subscription failed: ") + e.what());
-                return false;
-            }
-            
-            log_test_result("watch_orders - handler called", handler_called,
-                          handler_called ? "Handler was invoked" : "Handler was not called within timeout");
-            
-            if (received_valid_data && !received_data.empty()) {
-                log_test_result("watch_orders - data reception", true,
-                              "Valid order data received");
-            } else {
-                log_test_result("watch_orders - data reception", false, 
-                              "No valid order data received within timeout period");
-            }
-            
-            return subscription_successful;
-            
-        } catch (const exception& e) {
-            log_test_result("watch_orders - exception handling", false,
-                          string("Exception: ") + e.what());
-            return false;
-        }
-    }
-        
-    bool test_watch_order_book() {
-        cout << "Testing watch_order_book()" << endl;
-        
-        try {
-            bool subscription_successful = false;
-            bool received_valid_data = false;
-            bool handler_called = false;
-            nlohmann::json received_data;
-            
-            // Define a handler function similar to main.cpp
-            auto orderBookHandler = [&](const nlohmann::json &message) {
-                handler_called = true;
-                received_data = message;
-                
-                if (!message.empty()) {
-                    received_valid_data = true;
-                }
-                
-                cout << "Order Book Update Received:" << endl;
 
-                // Sometimes the feed gives "data", sometimes bids/asks directly
-                const nlohmann::json *data = nullptr;
-                if (message.contains("data"))
-                    data = &message["data"];
-                else
-                    data = &message;
-
-                // instrument_name / change_id / timestamp may exist only in "data"
-                if (data->contains("instrument_name"))
-                    cout << "Instrument: " << data->value("instrument_name", "N/A") << endl;
-                if (data->contains("change_id"))
-                    cout << "Change ID: " << data->value("change_id", 0) << endl;
-                if (data->contains("timestamp"))
-                    cout << "Timestamp: " << data->value("timestamp", 0) << endl;
-
-                // Handle bids
-                if (data->contains("bids")) {
-                    cout << "Top Bids:" << endl;
-                    for (auto &bid : (*data)["bids"]) {
-                        // ["new", price, amount]
-                        string action = bid[0].get<string>();
-                        double price = bid[1].get<double>();
-                        double amount = bid[2].get<double>();
-
-                        cout << "  Action: " << action
-                                  << " | Price: " << price
-                                  << " | Amount: " << amount << endl;
-                    }
-                }
-
-                // Handle asks
-                if (data->contains("asks")) {
-                    cout << "Top Asks:" << endl;
-                    for (auto &ask : (*data)["asks"]) {
-                        string action = ask[0].get<string>();
-                        double price = ask[1].get<double>();
-                        double amount = ask[2].get<double>();
-
-                        cout << "  Action: " << action
-                                  << " | Price: " << price
-                                  << " | Amount: " << amount << endl;
-                    }
-                }
-
-                cout << "----------------------------------------" << endl;
-            };
-            
-            // Parameters for subscription similar to main.cpp
-            nlohmann::json params = {
-                {"interval", "100ms"},
-                {"useDepthEndpoint", false}
-            };
-            
-            try {
-                // Subscribe to the order book for BTC-PERPETUAL
-                client->watch_order_book(orderBookHandler, "BTC-PERPETUAL", 20, params);
-                subscription_successful = true;
-                log_test_result("watch_order_book - subscription setup", true);
-                
-                cout << "Subscribed to order book updates. Waiting for messages (5 seconds)..." << endl;
-                this_thread::sleep_for(chrono::seconds(5));
-                
-            } catch (const exception& e) {
-                log_test_result("watch_order_book - subscription setup", false,
-                              string("Subscription failed: ") + e.what());
-                return false;
-            }
-            
-            log_test_result("watch_order_book - handler called", handler_called,
-                          handler_called ? "Handler was invoked" : "Handler was not called within timeout");
-            
-            if (received_valid_data && !received_data.empty()) {
-                log_test_result("watch_order_book - data reception", true,
-                              "Valid order book data received");
-            } else {
-                log_test_result("watch_order_book - data reception", false,
-                              "No valid order book data received within timeout period");
-            }
-            
-            return subscription_successful;
-            
-        } catch (const exception& e) {
-            log_test_result("watch_order_book - exception handling", false,
-                          string("Exception: ") + e.what());
-            return false;
-        }
-    }
-    
     bool test_authentication() {
         cout << "Testing authentication()" << endl;
         
@@ -1285,6 +1107,561 @@ public:
     }
 }
 
+bool test_watch_orders()
+{
+    cout << "Testing watch_orders()" << endl;
+
+    try
+    {
+        // Step 1: Ensure authentication first
+        cout << "Authenticating for watch_orders..." << endl;
+        try
+        {
+            client->authenticate();
+            log_test_result("watch_orders - authentication", true, "Successfully authenticated");
+        }
+        catch (const exception &e)
+        {
+            log_test_result("watch_orders - authentication", false, string("Auth failed: ") + e.what());
+            return false;
+        }
+
+        // Step 2: Create a test order to generate watch events
+        cout << "Creating test order to generate watch events..." << endl;
+        string test_order_id = "";
+        try
+        {
+            nlohmann::json params = {
+                {"post_only", true},
+                {"timeInForce", "GTC"}};
+
+            nlohmann::json order = client->create_order(
+                "BTC-PERPETUAL", "limit", "buy", 10, 1000.0, params);
+
+            if (order.contains("id"))
+            {
+                test_order_id = order["id"].get<string>();
+                cout << "Created test order: " << test_order_id << endl;
+                log_test_result("watch_orders - test order created", true, "Order ID: " + test_order_id);
+            }
+            else
+            {
+                log_test_result("watch_orders - test order created", false, "No order ID in response");
+            }
+        }
+        catch (const exception &e)
+        {
+            cout << "Failed to create test order: " << e.what() << endl;
+            cout << "Proceeding with watch_orders test anyway..." << endl;
+        }
+
+        // Step 3: Set up handler with improved validation
+        bool handler_called = false;
+        bool data_valid = false;
+        bool message_structure_valid = false;
+        bool order_fields_valid = false;
+        int messages_received = 0;
+        nlohmann::json last_order_data;
+
+        auto orderHandler = [&](const nlohmann::json &order)
+        {
+            handler_called = true;
+            messages_received++;
+            last_order_data = order;
+
+            cout << "Order Update #" << messages_received << " Received:" << endl;
+
+            if (order.empty())
+            {
+                log_test_result("watch_orders - handler non-empty data", false, "Order data is empty");
+                return;
+            }
+            data_valid = true;
+
+            if (!order.is_object())
+            {
+                log_test_result("watch_orders - handler object format", false, "Order data is not an object");
+                return;
+            }
+            message_structure_valid = true;
+
+            vector<string> required_order_fields = {"order_id", "instrument_name", "direction", "price", "amount", "order_state"};
+            bool all_order_fields_present = true;
+
+            for (const auto &field : required_order_fields)
+            {
+                if (!order.contains(field))
+                {
+                    all_order_fields_present = false;
+                    log_test_result("watch_orders - required order fields", false, "Missing field: " + field);
+                    break;
+                }
+            }
+
+            if (all_order_fields_present)
+            {
+                order_fields_valid = true;
+
+                string order_id = order.value("order_id", "N/A");
+                string instrument = order.value("instrument_name", "N/A");
+                string direction = order.value("direction", "N/A");
+                double price = order.value("price", 0.0);
+                double amount = order.value("amount", 0.0);
+                double filled_amount = order.value("filled_amount", 0.0);
+                string order_state = order.value("order_state", "N/A");
+
+                cout << "  Order ID: " << order_id << endl;
+                cout << "  Instrument: " << instrument << endl;
+                cout << "  Direction: " << direction << endl;
+                cout << "  Price: " << price << endl;
+                cout << "  Amount: " << amount << endl;
+                cout << "  Filled: " << filled_amount << endl;
+                cout << "  State: " << order_state << endl;
+
+                bool direction_valid = (direction == "buy" || direction == "sell");
+                if (!direction_valid)
+                {
+                    log_test_result("watch_orders - valid direction", false, "Invalid direction: " + direction);
+                }
+
+                bool price_valid = (price >= 0);
+                if (!price_valid)
+                {
+                    log_test_result("watch_orders - valid price", false, "Invalid price: " + to_string(price));
+                }
+
+                bool amount_valid = (amount > 0);
+                if (!amount_valid)
+                {
+                    log_test_result("watch_orders - valid amount", false, "Invalid amount: " + to_string(amount));
+                }
+
+                bool filled_amount_valid = (filled_amount >= 0 && filled_amount <= amount);
+                if (!filled_amount_valid)
+                {
+                    log_test_result("watch_orders - valid filled amount", false,
+                                    "Invalid filled amount: " + to_string(filled_amount) + " (should be 0 <= filled <= " + to_string(amount) + ")");
+                }
+
+                vector<string> valid_states = {"open", "filled", "rejected", "cancelled", "untriggered", "triggered"};
+                bool state_valid = find(valid_states.begin(), valid_states.end(), order_state) != valid_states.end();
+                if (!state_valid)
+                {
+                    log_test_result("watch_orders - valid order state", false, "Invalid order state: " + order_state);
+                }
+
+                if (instrument.find("BTC") != string::npos || instrument.find("ETH") != string::npos)
+                {
+                    log_test_result("watch_orders - recognized instrument", true, "Instrument: " + instrument);
+                }
+
+                if (order.contains("timestamp"))
+                {
+                    long long timestamp = order.value("timestamp", 0);
+                    auto now = chrono::system_clock::now();
+                    auto now_ms = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+                    bool timestamp_recent = (now_ms - timestamp) < 300000; // Within 5 minutes
+                    log_test_result("watch_orders - recent timestamp", timestamp_recent,
+                                    timestamp_recent ? "Timestamp is recent" : "Timestamp too old: " + to_string(timestamp));
+                }
+            }
+
+            cout << "----------------------------------------" << endl;
+        };
+
+        // Step 4: Start watching orders
+        cout << "Subscribing to order updates..." << endl;
+
+        try
+        {
+            client->watch_orders(orderHandler);
+            log_test_result("watch_orders - subscription", true, "Successfully subscribed to order updates");
+        }
+        catch (const exception &e)
+        {
+            log_test_result("watch_orders - subscription", false, string("Subscription failed: ") + e.what());
+            return false;
+        }
+
+        // Step 5: Wait for initial order updates
+        cout << "Waiting for initial order updates (5 seconds)..." << endl;
+        this_thread::sleep_for(chrono::seconds(5));
+
+        // Step 6: If we created an order, modify it to generate updates
+        if (!test_order_id.empty())
+        {
+            cout << "Cancelling test order to generate order state change..." << endl;
+            try
+            {
+                client->cancel_order(test_order_id, "BTC-PERPETUAL");
+                cout << "Test order cancelled, waiting for cancel update..." << endl;
+                this_thread::sleep_for(chrono::seconds(3));
+            }
+            catch (const exception &e)
+            {
+                cout << "Failed to cancel test order: " << e.what() << endl;
+            }
+        }
+
+        // Step 7: Wait a bit more for any delayed updates
+        cout << "Waiting for additional order updates (7 seconds)..." << endl;
+        this_thread::sleep_for(chrono::seconds(7));
+
+        // Step 8: Validate results
+        log_test_result("watch_orders - handler called", handler_called,
+                        handler_called ? "Messages received: " + to_string(messages_received) : "No messages received");
+
+        if (handler_called)
+        {
+            log_test_result("watch_orders - data validation", data_valid, "Order data is valid");
+            log_test_result("watch_orders - message structure", message_structure_valid, "Order structure is valid");
+            log_test_result("watch_orders - order fields", order_fields_valid, "Order fields are valid");
+
+            if (messages_received > 1)
+            {
+                log_test_result("watch_orders - multiple messages", true,
+                                "Received " + to_string(messages_received) + " order updates");
+            }
+
+            if (!last_order_data.empty())
+            {
+                cout << "Last Order Update Summary:" << endl;
+                cout << "  Total messages: " << messages_received << endl;
+                cout << "  Last order state: " << last_order_data.value("order_state", "N/A") << endl;
+                cout << "  Last instrument: " << last_order_data.value("instrument_name", "N/A") << endl;
+            }
+
+            return true;
+        }
+        else
+        {
+            // Try alternative diagnostic approach
+            cout << "No order updates received via handler. Checking WebSocket connection..." << endl;
+
+            // Test if we can get current orders
+            try
+            {
+                nlohmann::json current_orders = client->fetch_orders("BTC-PERPETUAL");
+                if (!current_orders.empty())
+                {
+                    cout << "Found " << current_orders.size() << " existing orders" << endl;
+                    log_test_result("watch_orders - existing orders check", true,
+                                    "Found " + to_string(current_orders.size()) + " orders");
+                }
+                else
+                {
+                    cout << "No existing orders found" << endl;
+                    log_test_result("watch_orders - existing orders check", true, "No existing orders");
+                }
+            }
+            catch (const exception &e)
+            {
+                log_test_result("watch_orders - existing orders check", false,
+                                string("Failed to fetch orders: ") + e.what());
+            }
+
+            log_test_result("watch_orders - websocket connection", false,
+                            "No order updates received - WebSocket may not be working properly");
+            return false;
+        }
+    }
+    catch (const exception &e)
+    {
+        log_test_result("watch_orders - exception handling", false,
+                        string("Exception: ") + e.what());
+        return false;
+    }
+}
+
+bool test_watch_order_book()
+{
+    cout << "Testing watch_order_book()" << endl;
+
+    try
+    {
+        // Ensure authentication first
+        cout << "Authenticating for watch_order_book..." << endl;
+        try
+        {
+            client->authenticate();
+            log_test_result("watch_order_book - authentication", true, "Successfully authenticated");
+        }
+        catch (const exception &e)
+        {
+            log_test_result("watch_order_book - authentication", false, string("Auth failed: ") + e.what());
+            return false;
+        }
+
+        // Continue with existing test logic
+        bool handler_called = false;
+        bool data_valid = false;
+        bool orderbook_structure_valid = false;
+        bool bids_asks_valid = false;
+        bool price_levels_valid = false;
+        int updates_received = 0;
+        nlohmann::json last_orderbook_data;
+
+        auto orderBookHandler = [&](const nlohmann::json &message)
+        {
+            handler_called = true;
+            updates_received++;
+            last_orderbook_data = message;
+
+            cout << "Order Book Update #" << updates_received << " Received:" << endl;
+
+            if (message.empty())
+            {
+                log_test_result("watch_order_book - handler non-empty data", false, "Order book data is empty");
+                return;
+            }
+            data_valid = true;
+
+            const nlohmann::json *data = nullptr;
+            if (message.contains("data"))
+            {
+                data = &message["data"];
+            }
+            else
+            {
+                data = &message;
+            }
+
+            if (!data->is_object())
+            {
+                log_test_result("watch_order_book - handler object format", false, "Order book data is not an object");
+                return;
+            }
+            orderbook_structure_valid = true;
+
+            if (data->contains("instrument_name"))
+            {
+                string instrument = data->value("instrument_name", "N/A");
+                cout << "  Instrument: " << instrument << endl;
+
+                bool valid_instrument = (instrument.find("BTC") != string::npos ||
+                                         instrument.find("ETH") != string::npos ||
+                                         instrument.find("PERPETUAL") != string::npos);
+                if (valid_instrument)
+                {
+                    log_test_result("watch_order_book - valid instrument", true, "Instrument: " + instrument);
+                }
+            }
+
+            if (data->contains("change_id"))
+            {
+                long long change_id = data->value("change_id", 0);
+                cout << "  Change ID: " << change_id << endl;
+
+                bool valid_change_id = (change_id > 0);
+                if (valid_change_id)
+                {
+                    log_test_result("watch_order_book - valid change_id", true, "Change ID: " + to_string(change_id));
+                }
+            }
+
+            if (data->contains("timestamp"))
+            {
+                long long timestamp = data->value("timestamp", 0);
+                cout << "  Timestamp: " << timestamp << endl;
+
+                auto now = chrono::system_clock::now();
+                auto now_ms = chrono::duration_cast<chrono::milliseconds>(now.time_since_epoch()).count();
+                bool timestamp_recent = abs(now_ms - timestamp) < 120000; // Within 1 minute
+                log_test_result("watch_order_book - recent timestamp", timestamp_recent,
+                                timestamp_recent ? "Timestamp is recent" : "Timestamp: " + to_string(timestamp));
+            }
+
+            bool bids_processed = false;
+            bool asks_processed = false;
+
+            if (data->contains("bids") && (*data)["bids"].is_array())
+            {
+                bids_processed = true;
+                auto bids = (*data)["bids"];
+                cout << "  Bids count: " << bids.size() << endl;
+
+                bool bids_structure_valid = true;
+                double prev_bid_price = numeric_limits<double>::max();
+
+                for (size_t i = 0; i < min(size_t(5), bids.size()); i++)
+                {
+                    if (!bids[i].is_array() || bids[i].size() < 3)
+                    {
+                        bids_structure_valid = false;
+                        break;
+                    }
+
+                    string action = bids[i][0].get<string>();
+                    double price = bids[i][1].get<double>();
+                    double amount = bids[i][2].get<double>();
+
+                    cout << "    Bid " << i + 1 << ": " << action << " | Price: " << price << " | Amount: " << amount << endl;
+
+                    bool valid_action = (action == "new" || action == "change" || action == "delete");
+                    bool valid_price = (price > 0);
+                    bool valid_amount = (amount >= 0);
+                    bool price_descending = (price < prev_bid_price);
+
+                    if (!valid_action || !valid_price || !valid_amount)
+                    {
+                        bids_structure_valid = false;
+                        log_test_result("watch_order_book - bid data validation", false,
+                                        "Invalid bid data at index " + to_string(i));
+                    }
+
+                    if (i > 0 && !price_descending && amount > 0)
+                    {
+                        log_test_result("watch_order_book - bid price ordering", false,
+                                        "Bids not in descending price order at index " + to_string(i));
+                    }
+
+                    prev_bid_price = price;
+                }
+
+                if (bids_structure_valid)
+                {
+                    log_test_result("watch_order_book - bids structure", true, "Bids data structure is valid");
+                }
+            }
+
+            if (data->contains("asks") && (*data)["asks"].is_array())
+            {
+                asks_processed = true;
+                auto asks = (*data)["asks"];
+                cout << "  Asks count: " << asks.size() << endl;
+
+                bool asks_structure_valid = true;
+                double prev_ask_price = 0.0;
+
+                for (size_t i = 0; i < min(size_t(5), asks.size()); i++)
+                {
+                    if (!asks[i].is_array() || asks[i].size() < 3)
+                    {
+                        asks_structure_valid = false;
+                        break;
+                    }
+
+                    string action = asks[i][0].get<string>();
+                    double price = asks[i][1].get<double>();
+                    double amount = asks[i][2].get<double>();
+
+                    cout << "    Ask " << i + 1 << ": " << action << " | Price: " << price << " | Amount: " << amount << endl;
+
+                    bool valid_action = (action == "new" || action == "change" || action == "delete");
+                    bool valid_price = (price > 0);
+                    bool valid_amount = (amount >= 0);
+                    bool price_ascending = (i == 0 || price > prev_ask_price);
+
+                    if (!valid_action || !valid_price || !valid_amount)
+                    {
+                        asks_structure_valid = false;
+                        log_test_result("watch_order_book - ask data validation", false,
+                                        "Invalid ask data at index " + to_string(i));
+                    }
+
+                    if (i > 0 && !price_ascending && amount > 0)
+                    {
+                        log_test_result("watch_order_book - ask price ordering", false,
+                                        "Asks not in ascending price order at index " + to_string(i));
+                    }
+
+                    prev_ask_price = price;
+                }
+
+                if (asks_structure_valid)
+                {
+                    log_test_result("watch_order_book - asks structure", true, "Asks data structure is valid");
+                }
+            }
+
+            if (bids_processed || asks_processed)
+            {
+                bids_asks_valid = true;
+                price_levels_valid = true;
+            }
+
+            cout << "----------------------------------------" << endl;
+        };
+
+        string test_symbol = "BTC-PERPETUAL";
+        int limit = 20;
+        nlohmann::json params = {
+            {"interval", "100ms"},
+            {"useDepthEndpoint", false}};
+
+        cout << "Subscribing to order book updates for " << test_symbol << "..." << endl;
+
+        client->watch_order_book(orderBookHandler, test_symbol, limit, params);
+
+        cout << "Waiting for order book updates (15 seconds)..." << endl;
+        this_thread::sleep_for(chrono::seconds(15));
+
+        log_test_result("watch_order_book - handler called", handler_called,
+                        handler_called ? "Updates received: " + to_string(updates_received) : "No updates received");
+
+        if (handler_called)
+        {
+            log_test_result("watch_order_book - data validation", data_valid, "Order book data is valid");
+            log_test_result("watch_order_book - structure validation", orderbook_structure_valid, "Order book structure is valid");
+            log_test_result("watch_order_book - bids/asks validation", bids_asks_valid, "Bids/asks data is valid");
+            log_test_result("watch_order_book - price levels validation", price_levels_valid, "Price levels are valid");
+
+            if (updates_received > 5)
+            {
+                log_test_result("watch_order_book - frequent updates", true,
+                                "Received " + to_string(updates_received) + " rapid updates");
+            }
+
+            if (!last_orderbook_data.empty())
+            {
+                cout << "Order Book Update Summary:" << endl;
+                cout << "  Total updates: " << updates_received << endl;
+                cout << "  Test symbol: " << test_symbol << endl;
+                cout << "  Update interval: 100ms" << endl;
+
+                const nlohmann::json *last_data = nullptr;
+                if (last_orderbook_data.contains("data"))
+                {
+                    last_data = &last_orderbook_data["data"];
+                }
+                else
+                {
+                    last_data = &last_orderbook_data;
+                }
+
+                if (last_data->contains("bids") && !(*last_data)["bids"].empty())
+                {
+                    auto first_bid = (*last_data)["bids"][0];
+                    cout << "  Best bid: " << first_bid[1].get<double>() << " @ " << first_bid[2].get<double>() << endl;
+                }
+
+                if (last_data->contains("asks") && !(*last_data)["asks"].empty())
+                {
+                    auto first_ask = (*last_data)["asks"][0];
+                    cout << "  Best ask: " << first_ask[1].get<double>() << " @ " << first_ask[2].get<double>() << endl;
+                }
+            }
+
+            log_test_result("watch_order_book - real-time updates", true,
+                            "Successfully received real-time order book updates");
+        }
+        else
+        {
+            log_test_result("watch_order_book - connection failed", false,
+                            "No order book updates received - WebSocket connection may have failed");
+            return false;
+        }
+
+        return handler_called && data_valid && orderbook_structure_valid;
+    }
+    catch (const exception &e)
+    {
+        log_test_result("watch_order_book - exception handling", false,
+                        string("Exception: ") + e.what());
+        return false;
+    }
+}
+
     void run_all_tests() {
 
         cout << " DERIBIT EXCHANGE TEST" << endl;
@@ -1300,10 +1677,8 @@ public:
         bool create_order_passed = test_create_order();
         bool fetch_order_passed = test_fetch_order();
         bool cancel_order_passed = test_cancel_order();
-
-        //not working 
-        // bool watch_orders_passed = test_watch_orders();
-        // bool watch_order_book_passed = test_watch_order_book();
+        bool watch_orders_passed = test_watch_orders();
+        bool watch_order_book_passed = test_watch_order_book();
         
      
         cout << "TEST SUMMARY" << endl;
